@@ -41,6 +41,17 @@ type LabOverview = {
   recent_activity: Array<{ gen_id: string; label: string; timestamp: string; symbol: string; side: string; reason: string }>;
 };
 
+/** GET /api/lab/worker-status — proof the cloud scheduler is looping */
+type WorkerStatus = {
+  where_this_runs: string;
+  lab_worker_disabled: boolean;
+  process_boot_at: string | null;
+  scheduler_interval_seconds: number | null;
+  lab_last_cycle_at: string | null;
+  seconds_since_last_lab_cycle: number | null;
+  check_logs_for: string;
+};
+
 type Position = {
   symbol: string;
   quantity: number;
@@ -171,6 +182,7 @@ const TABS: { id: TabId; label: string }[] = [
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
   const { data: overview, error: overviewErr } = usePoll<LabOverview>(API + LAB + "/overview", 5000);
+  const { data: workerStatus, error: workerErr } = usePoll<WorkerStatus>(API + LAB + "/worker-status", 5000);
   const { data: market } = usePoll<MarketTick[]>(API + "/market", 10000);
   const { data: comparison } = usePoll<ComparisonRow[]>(API + LAB + "/comparison", 5000);
   const [genDetail, setGenDetail] = useState<Record<string, { status: any; positions: Position[]; trades: Trade[] }>>({});
@@ -253,7 +265,7 @@ export default function App() {
 
       <main style={{ maxWidth: 1400, margin: "0 auto", padding: "1.5rem 2rem" }}>
         {activeTab === "overview" && overview && (
-          <OverviewTab overview={overview} market={market || []} />
+          <OverviewTab overview={overview} market={market || []} worker={workerStatus} workerError={workerErr} />
         )}
         {activeTab === "gen1" && <GenTab genId="1" label="Gen 1: Baseline Bot" description="Original bot. Unchanged for comparison. Buys dips, sells on rise. No smart prediction." detail={genDetail["1"]} summary={overview?.generations?.find((g) => g.gen_id === "1")} loading={genDetailLoading["1"]} error={genDetailError["1"]} />}
         {activeTab === "gen2" && <GenTab genId="2" label="Gen 2: Optimized Bot" description="Same dip-buy idea with tighter risk: smaller positions, more cooldown, disciplined exits." detail={genDetail["2"]} summary={overview?.generations?.find((g) => g.gen_id === "2")} loading={genDetailLoading["2"]} error={genDetailError["2"]} />}
@@ -302,7 +314,101 @@ function Card({ title, value, sub, positive }: { title: string; value: string; s
 
 const STARTING_BALANCE = 10_000;
 
-function OverviewTab({ overview, market }: { overview: LabOverview; market: MarketTick[] }) {
+function WorkerLiveBanner({ worker, error }: { worker: WorkerStatus | null; error: string | null }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (error) {
+    return (
+      <div
+        style={{
+          background: "var(--red)",
+          color: "#fff",
+          borderRadius: 10,
+          padding: "1rem 1.25rem",
+          marginBottom: "1.5rem",
+          fontWeight: 600,
+        }}
+      >
+        Worker status unreachable: {error}. Is VITE_API_BASE_URL set to your Railway URL?
+      </div>
+    );
+  }
+  if (!worker) {
+    return (
+      <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10, padding: "1rem", marginBottom: "1.5rem" }}>
+        Loading cloud worker status…
+      </div>
+    );
+  }
+
+  const intervalSec = worker.scheduler_interval_seconds && worker.scheduler_interval_seconds > 0 ? worker.scheduler_interval_seconds : 90;
+  const lastIso = worker.lab_last_cycle_at;
+  const lastMs = lastIso ? Date.parse(lastIso) : NaN;
+  const agoSec = Number.isFinite(lastMs) ? Math.max(0, Math.floor((Date.now() - lastMs) / 1000)) : null;
+
+  let headline: string;
+  let sub: string;
+  let bg: string;
+  let border: string;
+
+  if (worker.lab_worker_disabled) {
+    headline = "Background worker OFF";
+    sub = "LAB_WORKER_DISABLED is set on the server. The lab will not run scheduled trading cycles.";
+    bg = "rgba(180, 80, 80, 0.2)";
+    border = "var(--red)";
+  } else if (agoSec == null) {
+    headline = "Worker starting — no full cycle yet";
+    sub = `Scheduler interval ~${intervalSec}s. If this stays for many minutes, check CoinGecko / logs for ${worker.check_logs_for}.`;
+    bg = "rgba(200, 160, 60, 0.2)";
+    border = "#c9a227";
+  } else if (agoSec <= Math.max(intervalSec * 3, intervalSec + 120)) {
+    headline = "CLOUD WORKER LIVE";
+    sub = `Last lab cycle ${agoSec}s ago (Toronto clock below). This runs on the server — you can close your laptop. Target cadence ~${intervalSec}s.`;
+    bg = "rgba(60, 140, 80, 0.25)";
+    border = "var(--green)";
+  } else {
+    headline = "Worker may be stuck or prices unavailable";
+    sub = `No successful cycle for ~${agoSec}s (expected about every ${intervalSec}s). Check Railway logs for ${worker.check_logs_for} or CoinGecko 429.`;
+    bg = "rgba(200, 120, 60, 0.2)";
+    border = "#c97a27";
+  }
+
+  return (
+    <div
+      style={{
+        background: bg,
+        border: `2px solid ${border}`,
+        borderRadius: 12,
+        padding: "1.1rem 1.35rem",
+        marginBottom: "1.5rem",
+      }}
+    >
+      <div style={{ fontSize: "1.15rem", fontWeight: 700, letterSpacing: "0.02em", marginBottom: "0.5rem" }}>{headline}</div>
+      <div style={{ fontSize: "0.9rem", color: "var(--text-muted)", lineHeight: 1.5, marginBottom: "0.65rem" }}>{sub}</div>
+      <div style={{ fontSize: "0.8rem", fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+        <div>Server boot: {worker.process_boot_at ? formatDateTime(worker.process_boot_at) : "—"}</div>
+        <div>Last cycle (UTC from API): {lastIso ? formatDateTime(lastIso) : "—"}</div>
+        <div>{worker.where_this_runs}</div>
+      </div>
+    </div>
+  );
+}
+
+function OverviewTab({
+  overview,
+  market,
+  worker,
+  workerError,
+}: {
+  overview: LabOverview;
+  market: MarketTick[];
+  worker: WorkerStatus | null;
+  workerError: string | null;
+}) {
   const [reportRange, setReportRange] = useState("all_time");
   const [reportFormat, setReportFormat] = useState("zip");
   const [reportDownloading, setReportDownloading] = useState(false);
@@ -358,12 +464,23 @@ function OverviewTab({ overview, market }: { overview: LabOverview; market: Mark
 
   return (
     <>
+      <WorkerLiveBanner worker={worker} error={workerError} />
       <h2 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "1rem" }}>Dashboard</h2>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
         <Card title="Bots active" value={String(overview.total_bots_active)} />
         <Card title="Combined P&L" value={formatUsd(overview.combined_pnl_usd)} sub={formatPct(overview.combined_pnl_percent)} positive={overview.combined_pnl_usd >= 0} />
         <Card title="Open positions" value={String(overview.total_open_positions)} />
-        <Card title="Last cycle" value={overview.last_cycle ? formatTime(overview.last_cycle) : "—"} />
+        <Card
+          title="Last lab cycle"
+          value={worker?.lab_last_cycle_at ? formatTime(worker.lab_last_cycle_at) : overview.last_cycle ? formatTime(overview.last_cycle) : "—"}
+          sub={
+            worker?.lab_last_cycle_at
+              ? "Same clock as banner — updates when the cloud worker finishes a cycle"
+              : overview.last_cycle
+                ? "From overview"
+                : undefined
+          }
+        />
       </div>
       <h3 style={{ fontSize: "1rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>Portfolio value vs $10k</h3>
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "1rem 1.25rem", marginBottom: "2rem" }}>
