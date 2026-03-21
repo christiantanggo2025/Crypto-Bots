@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-/** Production: set VITE_API_BASE_URL to your Railway URL (no trailing slash), e.g. https://your-app.up.railway.app */
+/** Vercel: leave unset → same-origin /api → serverless proxy to Railway (RAILWAY_API_BASE_URL). Or set VITE_API_BASE_URL for direct calls. */
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const API = API_BASE ? `${API_BASE}/api` : "/api";
 const LAB = "/lab"; // API + LAB = full /api/lab or https://host/api/lab
@@ -138,9 +138,6 @@ function usePoll<T>(url: string, intervalMs: number) {
 
 function formatUsd(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
-}
-function formatCad(n: number) {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
 function formatPct(n: number) {
   return n >= 0 ? `+${n.toFixed(2)}%` : `${n.toFixed(2)}%`;
@@ -333,7 +330,7 @@ function WorkerLiveBanner({ worker, error }: { worker: WorkerStatus | null; erro
           fontWeight: 600,
         }}
       >
-        Worker status unreachable: {error}. Is VITE_API_BASE_URL set to your Railway URL?
+        Worker status unreachable: {error}. On Vercel set RAILWAY_API_BASE_URL (proxy) or VITE_API_BASE_URL (direct), then redeploy.
       </div>
     );
   }

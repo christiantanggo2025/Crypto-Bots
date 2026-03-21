@@ -43,13 +43,14 @@ If you skip a volume, the lab still runs but state resets when the service resta
 1. In [Vercel](https://vercel.com/) → **Add New** → **Project** → import the same Git repo.
 2. **Root Directory:** `frontend`
 3. **Framework preset:** Vite (or “Other” with build `npm run build`, output `dist`).
-4. **Environment variables** (Production — and Preview if you want):
+4. **Environment variables** (Production — required for the UI to talk to Railway):
 
 | Name | Value |
 |------|--------|
-| `VITE_API_BASE_URL` | Your Railway URL **without** trailing slash, e.g. `https://your-app-production-xxxx.up.railway.app` |
+| **`RAILWAY_API_BASE_URL`** | **Recommended.** Your Railway app origin only: `https://your-app-production-xxxx.up.railway.app` (no trailing slash, no `/api`). The browser calls **same-origin** `/api/...` on Vercel; a serverless function proxies to Railway (see `frontend/api/[...slug].ts`). Works when your laptop is closed. |
+| `VITE_API_BASE_URL` | **Optional alternative.** Same URL as above — bakes the Railway origin into the JS bundle and calls Railway **directly** from the browser (needs CORS `*`, which we allow). Redeploy after every change. |
 
-5. Deploy. Open the Vercel URL; the UI will call `VITE_API_BASE_URL/api/...` on Railway.
+5. **Redeploy** after adding env vars. Open your **Vercel** URL on your phone; Overview should show **CLOUD WORKER LIVE** when Railway is cycling.
 
 ### Local production build test
 
@@ -75,7 +76,7 @@ npm run preview
 
 | Issue | What to check |
 |--------|----------------|
-| UI shows “Cannot reach API” | `VITE_API_BASE_URL` on Vercel matches Railway URL exactly; redeploy Vercel after changing env. |
+| UI shows “Cannot reach API” | Vercel → set **`RAILWAY_API_BASE_URL`** (recommended) or **`VITE_API_BASE_URL`** to your Railway `https://…` origin; **Redeploy**. |
 | CORS errors | Set `CORS_ORIGINS` on Railway to your Vercel origin(s), comma-separated, or leave default `*`. |
 | 502 / app won’t start | Railway logs; confirm Root Directory is `backend` and start command uses `$PORT`. |
 | State resets | Add a volume for `data/` as above. |
