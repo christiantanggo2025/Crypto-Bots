@@ -13,6 +13,7 @@ def get_signals(
     positions: dict,
     config: dict,
     last_trade_time_by_symbol: dict[str, datetime] | None = None,
+    trades_today: int = 0,
 ) -> tuple[list[tuple[str, OrderSide, float, str, str | None]], dict]:
     """
     Returns (signals, context). context has strategy_summary and activity_mode for UI.
