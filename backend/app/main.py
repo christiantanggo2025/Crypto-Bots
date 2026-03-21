@@ -15,6 +15,7 @@ from app.paper_engine import load_state, get_positions
 from app.trading_params import load_params, save_params, get_enabled_symbols
 from app.lab_settings import get_starting_balance_for_gen
 from app.bot_lab import run_lab_cycle
+from app.worker_info import mark_worker_boot
 from app.routers import lab as lab_router
 
 
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     log.info("Lab worker: lifespan startup begin")
 
     if os.getenv("LAB_WORKER_DISABLED", "").strip().lower() in ("1", "true", "yes"):
+        mark_worker_boot(interval_seconds=0, disabled=True)
         log.warning(
             "Lab worker: DISABLED via LAB_WORKER_DISABLED env — no background trading cycles will run. "
             "API-only mode."
@@ -62,6 +64,7 @@ async def lifespan(app: FastAPI):
     interval = max(int(get_price_update_interval_seconds()), 60)
     scheduler.add_job(run_lab_cycle, "interval", seconds=interval, id="lab_cycle", replace_existing=True)
     scheduler.start()
+    mark_worker_boot(interval_seconds=interval, disabled=False)
     log.info(
         "Lab worker: startup success — APScheduler running lab_cycle every %ss (id=lab_cycle)",
         interval,

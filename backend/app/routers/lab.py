@@ -14,6 +14,12 @@ from app.lab_settings import (
 from app.paper_engine import load_state, get_positions, reset_gen
 from app.market import get_cached_prices
 from app.bot_lab import lab_status, lab_last_cycle, get_gen_status
+from app.worker_info import (
+    process_boot_at,
+    scheduler_interval_seconds,
+    lab_worker_disabled,
+)
+from app.time_toronto import utc_now
 from app.models import (
     GenStatus,
     LabOverview,
@@ -51,6 +57,28 @@ def _recent_activity(limit: int = 20) -> list[dict]:
             })
     out.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
     return out[:limit]
+
+
+@router.get("/worker-status")
+async def lab_worker_status() -> dict:
+    """
+    Cloud worker proof-of-life. Does not depend on your browser or laptop.
+
+    - `lab_last_cycle_at` should refresh about every `scheduler_interval_seconds` when healthy.
+    - Railway logs: search for `[LAB_HEARTBEAT]`.
+    """
+    now = utc_now()
+    last = lab_last_cycle
+    secs = (now - last).total_seconds() if last else None
+    return {
+        "where_this_runs": "Server process (e.g. Railway). Closing your laptop does not stop this.",
+        "lab_worker_disabled": lab_worker_disabled,
+        "process_boot_at": process_boot_at.isoformat() if process_boot_at else None,
+        "scheduler_interval_seconds": scheduler_interval_seconds,
+        "lab_last_cycle_at": last.isoformat() if last else None,
+        "seconds_since_last_lab_cycle": round(secs, 1) if secs is not None else None,
+        "check_logs_for": "[LAB_HEARTBEAT]",
+    }
 
 
 @router.get("/overview")

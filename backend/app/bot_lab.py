@@ -5,6 +5,7 @@ Each gen has its own paper state and config. Status per gen is kept for the API.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 
 from app.time_toronto import count_trades_toronto_today, parse_trade_timestamp, utc_now
@@ -215,6 +216,8 @@ def _run_gen(gen_id: str, ticks: list, config: dict, state: dict, prices: dict):
 async def run_lab_cycle():
     """Fetch prices once, then run each enabled gen in sequence with same ticks."""
     global lab_last_cycle
+    # Loud prefix so Railway grep / log search finds it even if other INFO is hidden
+    log.info("[LAB_HEARTBEAT] cycle_start | pid=%s", os.getpid())
     log.info("Lab cycle begin")
     try:
         await _run_lab_cycle_impl()
@@ -222,6 +225,14 @@ async def run_lab_cycle():
     except Exception:
         # Do not re-raise: keep APScheduler running; full traceback is logged once.
         log.exception("Lab cycle failed: unhandled error")
+    finally:
+        lc = lab_last_cycle.isoformat() if lab_last_cycle else None
+        log.info(
+            "[LAB_HEARTBEAT] cycle_end | lab_last_cycle_at=%s | pid=%s | "
+            "(If you use Railway URL, this keeps running when your laptop is closed.)",
+            lc,
+            os.getpid(),
+        )
 
 
 async def _run_lab_cycle_impl():
