@@ -28,6 +28,7 @@ from app.strategies.gen2_optimized import get_signals as get_signals_gen2
 from app.strategies.gen3_adaptive import get_signals as get_signals_gen3
 from app.strategies.gen4_ai_supervisor import get_signals as get_signals_gen4
 from app.strategies.gen5_scalper import get_signals as get_signals_gen5
+from app.strategies.gen6_momentum_rider import get_signals as get_signals_gen6
 from app.news_sentiment import fetch_news_context
 from app.openai_supervisor import get_supervisor_decision
 from app.models import OrderSide
