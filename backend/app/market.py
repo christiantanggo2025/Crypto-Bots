@@ -47,10 +47,9 @@ def get_cached_prices(*, allow_stale: bool = False) -> list[MarketTick]:
     if not allow_stale and age > CACHE_MAX_AGE_SECONDS:
         return []
     if allow_stale and age > CACHE_MAX_AGE_SECONDS:
-        log.warning(
-            "Using stale price cache (age %.0fs > %ss) — CoinGecko likely rate-limited or failed",
+        log.info(
+            "Using stale price cache (age %.0fs) — continuing lab cycle until CoinGecko recovers",
             age,
-            CACHE_MAX_AGE_SECONDS,
         )
     return _cached_ticks
 
@@ -80,11 +79,12 @@ async def fetch_prices(symbols: list[str] | None = None) -> list[MarketTick]:
             r.raise_for_status()
             data = r.json()
     except httpx.HTTPStatusError as e:
-        # 429 Too Many Requests or other client/server error: don't crash, prefer stale cache
-        log.warning(
-            "CoinGecko HTTP error %s for markets request — falling back to cache",
-            e.response.status_code,
-        )
+        # 429 is normal on shared IPs; don't spam WARNING (Railway shows as errors)
+        code = e.response.status_code
+        if code == 429:
+            log.info("CoinGecko 429 — using cache (stale ok for lab cycle)")
+        else:
+            log.warning("CoinGecko HTTP %s for markets — falling back to cache", code)
         return get_cached_prices(allow_stale=True)
     except Exception as ex:
         log.warning("CoinGecko fetch failed (%s) — falling back to cache", type(ex).__name__)

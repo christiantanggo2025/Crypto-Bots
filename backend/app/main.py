@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
 import os
+import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,24 @@ from app.trading_params import load_params, save_params, get_enabled_symbols
 from app.lab_settings import get_starting_balance_for_gen
 from app.bot_lab import run_lab_cycle
 from app.routers import lab as lab_router
+
+
+def configure_app_logging() -> None:
+    """Railway treats stderr as 'error'; Python defaults hide INFO. Fix both."""
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(level)
+    if not app_logger.handlers:
+        h = logging.StreamHandler(sys.stdout)
+        h.setFormatter(logging.Formatter("%(levelname)s | %(name)s | %(message)s"))
+        app_logger.addHandler(h)
+    app_logger.propagate = False
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+configure_app_logging()
 
 log = logging.getLogger(__name__)
 
