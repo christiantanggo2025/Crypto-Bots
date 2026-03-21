@@ -547,6 +547,16 @@ def get_signals(
 
     rollup = _rollup_leg_history(g6.get("leg_history", []))
 
+    gen6_sells_usd = [
+        float(t["realized_pnl_usd"])
+        for t in (state.get("trades") or [])
+        if str(t.get("side", "")).lower() == "sell" and t.get("realized_pnl_usd") is not None
+    ]
+    if gen6_sells_usd:
+        avg_realized_usd = round(sum(gen6_sells_usd) / len(gen6_sells_usd), 4)
+    else:
+        avg_realized_usd = None
+
     evaluation_metrics = {
         "runner_activations": stats.get("runner_activations", 0),
         "protected_activations": stats.get("protected_activations", 0),
