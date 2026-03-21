@@ -34,13 +34,24 @@ def set_cached_prices(ticks: list[MarketTick]) -> None:
     _cache_time = utc_now()
 
 
-def get_cached_prices() -> list[MarketTick]:
-    """Return cached prices if younger than CACHE_MAX_AGE_SECONDS, else empty list."""
+def get_cached_prices(*, allow_stale: bool = False) -> list[MarketTick]:
+    """Return cached prices.
+
+    Default: only if younger than CACHE_MAX_AGE_SECONDS (fresh enough for API clients).
+    allow_stale=True: return last snapshot even if expired (lab worker / 429 fallback).
+    """
     global _cache_time
-    if _cache_time is None:
+    if _cache_time is None or not _cached_ticks:
         return []
-    if (utc_now() - _cache_time).total_seconds() > CACHE_MAX_AGE_SECONDS:
+    age = (utc_now() - _cache_time).total_seconds()
+    if not allow_stale and age > CACHE_MAX_AGE_SECONDS:
         return []
+    if allow_stale and age > CACHE_MAX_AGE_SECONDS:
+        log.warning(
+            "Using stale price cache (age %.0fs > %ss) — CoinGecko likely rate-limited or failed",
+            age,
+            CACHE_MAX_AGE_SECONDS,
+        )
     return _cached_ticks
 
 
