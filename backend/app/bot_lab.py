@@ -1,11 +1,13 @@
 """
-Strategy lab: one cycle = fetch prices once, then run Gen 1–4 in sequence with same snapshot.
+Strategy lab: one cycle = fetch prices once, then run Gen 1–6 in sequence with same snapshot.
 Each gen has its own paper state and config. Status per gen is kept for the API.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
+from app.time_toronto import count_trades_toronto_today, parse_trade_timestamp, utc_now
 from app.lab_settings import (
     get_gen_config,
     get_all_gen_configs,
@@ -30,6 +32,8 @@ from app.news_sentiment import fetch_news_context
 from app.openai_supervisor import get_supervisor_decision
 from app.models import OrderSide
 
+log = logging.getLogger(__name__)
+
 # Per-gen status for API (last run time, trade count today, Gen 4 last decision/reasoning)
 lab_status: dict[str, dict] = {
     "1": {"last_run": None, "trade_count_today": 0},
@@ -37,27 +41,23 @@ lab_status: dict[str, dict] = {
     "3": {"last_run": None, "trade_count_today": 0},
     "4": {"last_run": None, "trade_count_today": 0, "last_decision": None, "last_reasoning": None, "last_news_context": None},
     "5": {"last_run": None, "trade_count_today": 0},
+    "6": {"last_run": None, "trade_count_today": 0},
 }
 lab_last_cycle: datetime | None = None
 
 
 def _count_trades_today(state: dict) -> int:
-    today = datetime.utcnow().date().isoformat()
-    return sum(1 for t in state.get("trades", []) if (t.get("timestamp") or "").startswith(today))
+    return count_trades_toronto_today(state)
 
 
 def _last_trade_time_by_symbol(state: dict) -> dict[str, datetime]:
     out = {}
     for t in state.get("trades", []):
-        ts = t.get("timestamp")
-        if ts:
-            try:
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                sym = t.get("symbol", "")
-                if sym and (sym not in out or dt > out[sym]):
-                    out[sym] = dt
-            except Exception:
-                pass
+        dt = parse_trade_timestamp(t.get("timestamp"))
+        if dt:
+            sym = t.get("symbol", "")
+            if sym and (sym not in out or dt > out[sym]):
+                out[sym] = dt
     return out
 
 
@@ -155,27 +155,36 @@ def _apply_safety_overrides(decision_dict: dict, stats: dict) -> tuple[dict, boo
 
 def _run_gen(gen_id: str, ticks: list, config: dict, state: dict, prices: dict):
     state.setdefault("decisions", [])
+    gen5_context: dict | None = None
+    gen6_context: dict | None = None
     if gen_id == "1":
         result = get_signals_gen1(ticks, state["balance_usd"], state["positions"], config, _last_trade_time_by_symbol(state))
         signals = result if isinstance(result, list) else result[0]
         decisions: list = []
-        gen5_context: dict | None = None
     elif gen_id == "2":
         result = get_signals_gen2(ticks, state["balance_usd"], state["positions"], config, _last_trade_time_by_symbol(state))
         signals = result if isinstance(result, list) else result[0]
         decisions = []
-        gen5_context = None
     elif gen_id == "3":
         signals, decisions = get_signals_gen3(ticks, state["balance_usd"], state["positions"], config, _last_trade_time_by_symbol(state))
-        gen5_context = None
     elif gen_id == "5":
         signals, gen5_context = get_signals_gen5(ticks, state["balance_usd"], state["positions"], config, _last_trade_time_by_symbol(state), _count_trades_today(state))
         decisions = []
+    elif gen_id == "6":
+        signals, decisions, gen6_context = get_signals_gen6(
+            ticks,
+            state["balance_usd"],
+            state["positions"],
+            config,
+            _last_trade_time_by_symbol(state),
+            _count_trades_today(state),
+            state,
+        )
     else:
         return state
     for symbol, side, quantity, reason, world_signal in signals:
         execute_order(state, gen_id, symbol, side, quantity, prices.get(symbol, 0), reason, config, world_signal)
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = utc_now().isoformat()
     for d in decisions:
         state["decisions"].append({"timestamp": now_iso, "symbol": d.get("symbol", ""), "action": d.get("action", "skip"), "reason": d.get("reason", "")})
     state["decisions"] = state["decisions"][-MAX_DECISIONS_STORED:]
@@ -184,11 +193,37 @@ def _run_gen(gen_id: str, ticks: list, config: dict, state: dict, prices: dict):
         state["gen5_activity_mode"] = gen5_context.get("activity_mode", "active")
         state["gen5_market_avg_24h"] = gen5_context.get("market_avg_24h")
         state["gen5_broad_weakness"] = gen5_context.get("broad_weakness", False)
+    if gen_id == "6" and gen6_context:
+        state["gen6_strategy_summary"] = gen6_context.get("strategy_summary", "")
+        state["gen6_market_regime"] = gen6_context.get("market_regime", "mixed")
+        state["gen6_market_avg_24h"] = gen6_context.get("market_avg_24h")
+        state["gen6_broad_weakness"] = gen6_context.get("broad_weakness", False)
+        state["gen6_market_look"] = gen6_context.get("market_look", "mixed")
+        state["gen6_any_runner"] = gen6_context.get("any_runner", False)
+        state["gen6_protective_entries"] = gen6_context.get("protective_entries", False)
+        state["gen6_position_snapshots"] = gen6_context.get("position_snapshots", [])
+        state["gen6_evaluation_metrics"] = gen6_context.get("evaluation_metrics", {})
+        le = gen6_context.get("last_exit")
+        state["gen6_last_exit"] = le
+        if le:
+            state["gen6_last_exit_reason"] = le.get("reason")
+            state["gen6_last_exit_tag"] = le.get("tag")
     return state
 
 
 async def run_lab_cycle():
     """Fetch prices once, then run each enabled gen in sequence with same ticks."""
+    global lab_last_cycle
+    log.info("Lab cycle begin")
+    try:
+        await _run_lab_cycle_impl()
+        log.info("Lab cycle completed successfully")
+    except Exception:
+        # Do not re-raise: keep APScheduler running; full traceback is logged once.
+        log.exception("Lab cycle failed: unhandled error")
+
+
+async def _run_lab_cycle_impl():
     global lab_last_cycle
     configs = get_all_gen_configs()
     symbols = []
@@ -200,10 +235,16 @@ async def run_lab_cycle():
     if not ticks:
         ticks = get_cached_prices()
     if not ticks:
+        ticks = get_cached_prices(allow_stale=True)
+    if not ticks:
+        log.warning(
+            "Lab cycle skipped: no market ticks (CoinGecko returned nothing and cache is empty). "
+            "lab_last_cycle will not update until prices are available."
+        )
         return
 
     prices = {t.symbol: t.price for t in ticks}
-    lab_last_cycle = datetime.utcnow()
+    lab_last_cycle = utc_now()
 
     # Gen 4: fetch news, build rich market summary, get AI decision, then apply hard safety overrides
     news_context = await fetch_news_context()
@@ -222,7 +263,7 @@ async def run_lab_cycle():
     lab_status["4"]["last_reasoning"] = supervisor_decision.get("reasoning")
     lab_status["4"]["last_news_context"] = news_context[:500]
 
-    for gen_id in ("1", "2", "3", "4", "5"):
+    for gen_id in ("1", "2", "3", "4", "5", "6"):
         config = configs.get(gen_id) or get_gen_config(gen_id)
         if not config.get("enabled", True):
             continue
@@ -258,7 +299,7 @@ async def run_lab_cycle():
             reasoning_full = supervisor_decision.get("reasoning") or ""
             reasoning_summary = (reasoning_full[:120] + "…") if len(reasoning_full) > 120 else reasoning_full
             state["gen4_decision_history"].append({
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utc_now().isoformat(),
                 "decision": supervisor_decision.get("decision"),
                 "decision_source": decision_source,
                 "override_applied": override_applied,
@@ -274,7 +315,7 @@ async def run_lab_cycle():
         else:
             state = _run_gen(gen_id, gen_ticks, config, state, prices)
 
-        lab_status[gen_id]["last_run"] = datetime.utcnow()
+        lab_status[gen_id]["last_run"] = utc_now()
         lab_status[gen_id]["trade_count_today"] = _count_trades_today(state)
         save_state(gen_id, state)
 

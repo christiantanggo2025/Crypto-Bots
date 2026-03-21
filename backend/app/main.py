@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 import os
 
 from fastapi import FastAPI
@@ -15,17 +16,44 @@ from app.lab_settings import get_starting_balance_for_gen
 from app.bot_lab import run_lab_cycle
 from app.routers import lab as lab_router
 
+log = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await run_lab_cycle()
+    log.info("Lab worker: lifespan startup begin")
+
+    if os.getenv("LAB_WORKER_DISABLED", "").strip().lower() in ("1", "true", "yes"):
+        log.warning(
+            "Lab worker: DISABLED via LAB_WORKER_DISABLED env — no background trading cycles will run. "
+            "API-only mode."
+        )
+        yield
+        return
+
+    log.info("Lab worker: running initial lab cycle (blocking until complete)…")
+    try:
+        await run_lab_cycle()
+    except Exception:
+        log.exception("Lab worker: initial lab cycle raised (continuing to start scheduler)")
+
     scheduler = AsyncIOScheduler()
     from app.lab_settings import get_price_update_interval_seconds
-    interval = get_price_update_interval_seconds()
-    scheduler.add_job(run_lab_cycle, "interval", seconds=max(interval, 60))
+
+    interval = max(int(get_price_update_interval_seconds()), 60)
+    scheduler.add_job(run_lab_cycle, "interval", seconds=interval, id="lab_cycle", replace_existing=True)
     scheduler.start()
+    log.info(
+        "Lab worker: startup success — APScheduler running lab_cycle every %ss (id=lab_cycle)",
+        interval,
+    )
+    log.info("Lab worker: sleeping between cycles is handled by APScheduler (interval=%ss)", interval)
+
     yield
+
+    log.info("Lab worker: shutting down APScheduler…")
     scheduler.shutdown()
+    log.info("Lab worker: shutdown complete")
 
 
 app = FastAPI(title="Crypto Paper Bot", lifespan=lifespan)
@@ -61,7 +89,9 @@ async def status() -> BotStatus:
     pnl_usd = total_value - initial
     pnl_pct = (pnl_usd / initial * 100) if initial else 0
     from app.bot_lab import lab_status
-    today = sum(1 for t in state.get("trades", []) if (t.get("timestamp") or "").startswith(__import__("datetime").datetime.utcnow().date().isoformat()))
+    from app.time_toronto import count_trades_toronto_today
+
+    today = count_trades_toronto_today(state)
     return BotStatus(
         running=True,
         last_run=lab_status.get("1", {}).get("last_run"),

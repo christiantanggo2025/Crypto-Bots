@@ -1,7 +1,11 @@
+import logging
 import httpx
 from datetime import datetime
 
 from app.config import settings
+
+log = logging.getLogger(__name__)
+from app.time_toronto import utc_now
 from app.models import MarketTick
 
 # Map our symbols to CoinGecko IDs (free API, no key)
@@ -27,7 +31,7 @@ CACHE_MAX_AGE_SECONDS = 90
 def set_cached_prices(ticks: list[MarketTick]) -> None:
     global _cached_ticks, _cache_time
     _cached_ticks = ticks
-    _cache_time = datetime.utcnow()
+    _cache_time = utc_now()
 
 
 def get_cached_prices() -> list[MarketTick]:
@@ -35,7 +39,7 @@ def get_cached_prices() -> list[MarketTick]:
     global _cache_time
     if _cache_time is None:
         return []
-    if (datetime.utcnow() - _cache_time).total_seconds() > CACHE_MAX_AGE_SECONDS:
+    if (utc_now() - _cache_time).total_seconds() > CACHE_MAX_AGE_SECONDS:
         return []
     return _cached_ticks
 
@@ -65,12 +69,15 @@ async def fetch_prices(symbols: list[str] | None = None) -> list[MarketTick]:
             r.raise_for_status()
             data = r.json()
     except httpx.HTTPStatusError as e:
-        # 429 Too Many Requests or other client/server error: don't crash, use cache
-        if e.response.status_code == 429:
-            pass  # rate limited
-        return get_cached_prices()
-    except Exception:
-        return get_cached_prices()
+        # 429 Too Many Requests or other client/server error: don't crash, prefer stale cache
+        log.warning(
+            "CoinGecko HTTP error %s for markets request — falling back to cache",
+            e.response.status_code,
+        )
+        return get_cached_prices(allow_stale=True)
+    except Exception as ex:
+        log.warning("CoinGecko fetch failed (%s) — falling back to cache", type(ex).__name__)
+        return get_cached_prices(allow_stale=True)
 
     # Get USD→CAD rate (1 USDC ≈ 1 USD, so USDC in CAD ≈ rate)
     cad_per_usd: float | None = None
@@ -102,7 +109,7 @@ async def fetch_prices(symbols: list[str] | None = None) -> list[MarketTick]:
                 price_cad=price_cad,
                 change_24h=float(row.get("price_change_percentage_24h") or 0),
                 volume_24h=float(row.get("total_volume") or 0),
-                timestamp=datetime.utcnow(),
+                timestamp=utc_now(),
             )
         )
     if ticks:

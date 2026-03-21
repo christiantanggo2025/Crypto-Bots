@@ -1,7 +1,7 @@
 """Lab API: overview, per-gen status/positions/trades, comparison, settings, reset."""
-from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from app.lab_settings import (
     get_gen_config,
@@ -21,13 +21,22 @@ from app.models import (
     Trade,
     Position,
 )
+from app.lab_report import (
+    RANGE_ALIASES,
+    build_lab_report,
+    build_zip_bytes,
+    report_to_csv,
+    report_to_markdown,
+)
 
 router = APIRouter(prefix="/api/lab", tags=["lab"])
+
+LAB_GEN_IDS = ("1", "2", "3", "4", "5", "6")
 
 
 def _recent_activity(limit: int = 20) -> list[dict]:
     out = []
-    for gen_id in ("1", "2", "3", "4", "5"):
+    for gen_id in LAB_GEN_IDS:
         config = get_gen_config(gen_id)
         initial = get_starting_balance_for_gen(gen_id)
         state = load_state(gen_id, initial)
@@ -54,7 +63,7 @@ async def overview() -> LabOverview:
     combined_initial = 0.0
     total_positions = 0
 
-    for gen_id in ("1", "2", "3", "4", "5"):
+    for gen_id in LAB_GEN_IDS:
         config = configs.get(gen_id) or get_gen_config(gen_id)
         initial = get_starting_balance_for_gen(gen_id)
         state = load_state(gen_id, initial)
@@ -101,7 +110,7 @@ async def generations_list() -> list[GenStatus]:
 
 @router.get("/generations/{gen_id}/status")
 async def gen_status_detail(gen_id: str) -> dict:
-    if gen_id not in ("1", "2", "3", "4", "5"):
+    if gen_id not in LAB_GEN_IDS:
         raise HTTPException(404, "Unknown generation")
     config = get_gen_config(gen_id)
     initial = get_starting_balance_for_gen(gen_id)
@@ -125,6 +134,18 @@ async def gen_status_detail(gen_id: str) -> dict:
     gen5_activity_mode = state.get("gen5_activity_mode") if gen_id == "5" else None
     gen5_market_avg_24h = state.get("gen5_market_avg_24h") if gen_id == "5" else None
     gen5_broad_weakness = state.get("gen5_broad_weakness") if gen_id == "5" else None
+    gen6_strategy_summary = state.get("gen6_strategy_summary") if gen_id == "6" else None
+    gen6_market_regime = state.get("gen6_market_regime") if gen_id == "6" else None
+    gen6_market_avg_24h = state.get("gen6_market_avg_24h") if gen_id == "6" else None
+    gen6_broad_weakness = state.get("gen6_broad_weakness") if gen_id == "6" else None
+    gen6_market_look = state.get("gen6_market_look") if gen_id == "6" else None
+    gen6_any_runner = state.get("gen6_any_runner") if gen_id == "6" else None
+    gen6_protective_entries = state.get("gen6_protective_entries") if gen_id == "6" else None
+    gen6_position_snapshots = state.get("gen6_position_snapshots") if gen_id == "6" else None
+    gen6_evaluation_metrics = state.get("gen6_evaluation_metrics") if gen_id == "6" else None
+    gen6_last_exit = state.get("gen6_last_exit") if gen_id == "6" else None
+    gen6_last_exit_reason = state.get("gen6_last_exit_reason") if gen_id == "6" else None
+    gen6_last_exit_tag = state.get("gen6_last_exit_tag") if gen_id == "6" else None
     return {
         **gs,
         "label": config.get("label", f"Gen {gen_id}"),
@@ -141,6 +162,18 @@ async def gen_status_detail(gen_id: str) -> dict:
         "gen5_activity_mode": gen5_activity_mode,
         "gen5_market_avg_24h": gen5_market_avg_24h,
         "gen5_broad_weakness": gen5_broad_weakness,
+        "gen6_strategy_summary": gen6_strategy_summary,
+        "gen6_market_regime": gen6_market_regime,
+        "gen6_market_avg_24h": gen6_market_avg_24h,
+        "gen6_broad_weakness": gen6_broad_weakness,
+        "gen6_market_look": gen6_market_look,
+        "gen6_any_runner": gen6_any_runner,
+        "gen6_protective_entries": gen6_protective_entries,
+        "gen6_position_snapshots": gen6_position_snapshots,
+        "gen6_evaluation_metrics": gen6_evaluation_metrics,
+        "gen6_last_exit": gen6_last_exit,
+        "gen6_last_exit_reason": gen6_last_exit_reason,
+        "gen6_last_exit_tag": gen6_last_exit_tag,
         "trades": [t.model_dump(mode="json") for t in trades],
         "decisions": decisions,
     }
@@ -148,7 +181,7 @@ async def gen_status_detail(gen_id: str) -> dict:
 
 @router.get("/generations/{gen_id}/positions")
 async def gen_positions(gen_id: str) -> list[Position]:
-    if gen_id not in ("1", "2", "3", "4", "5"):
+    if gen_id not in LAB_GEN_IDS:
         raise HTTPException(404, "Unknown generation")
     initial = get_starting_balance_for_gen(gen_id)
     state = load_state(gen_id, initial)
@@ -159,7 +192,7 @@ async def gen_positions(gen_id: str) -> list[Position]:
 
 @router.get("/generations/{gen_id}/trades")
 async def gen_trades(gen_id: str, limit: int = 100) -> list[Trade]:
-    if gen_id not in ("1", "2", "3", "4", "5"):
+    if gen_id not in LAB_GEN_IDS:
         raise HTTPException(404, "Unknown generation")
     initial = get_starting_balance_for_gen(gen_id)
     state = load_state(gen_id, initial)
@@ -169,7 +202,7 @@ async def gen_trades(gen_id: str, limit: int = 100) -> list[Trade]:
 
 @router.post("/generations/{gen_id}/reset")
 async def gen_reset(gen_id: str) -> dict:
-    if gen_id not in ("1", "2", "3", "4", "5"):
+    if gen_id not in LAB_GEN_IDS:
         raise HTTPException(404, "Unknown generation")
     initial = get_starting_balance_for_gen(gen_id)
     state = reset_gen(gen_id, initial)
@@ -182,7 +215,7 @@ async def comparison() -> list[ComparisonRow]:
     prices = get_cached_prices()
     price_map = {t.symbol: t.price for t in prices}
     rows = []
-    for gen_id in ("1", "2", "3", "4", "5"):
+    for gen_id in LAB_GEN_IDS:
         config = configs.get(gen_id) or get_gen_config(gen_id)
         initial = get_starting_balance_for_gen(gen_id)
         state = load_state(gen_id, initial)
@@ -192,8 +225,17 @@ async def comparison() -> list[ComparisonRow]:
         pnl_usd = total_value - initial
         pnl_pct = (pnl_usd / initial * 100) if initial else 0
         trades = state.get("trades", [])
-        wins = sum(1 for t in trades if t.get("side") == "sell" and (t.get("total_usd", 0) or 0) > 0)
-        win_rate = (wins / len(trades) * 100) if trades else None
+        sells_scored = [
+            t
+            for t in trades
+            if (t.get("side") or "").lower() == "sell" and t.get("realized_pnl_usd") is not None
+        ]
+        win_count_realized = sum(
+            1 for t in sells_scored if float(t.get("realized_pnl_usd") or 0) > 0
+        )
+        win_rate = (
+            (win_count_realized / len(sells_scored) * 100) if sells_scored else None
+        )
         avg_per = (pnl_usd / len(trades)) if trades else None
         exposure = sum(p.value_usd for p in positions)
         rows.append(ComparisonRow(
@@ -202,7 +244,7 @@ async def comparison() -> list[ComparisonRow]:
             pnl_usd=pnl_usd,
             pnl_percent=pnl_pct,
             trade_count=len(trades),
-            win_count=wins,
+            win_count=win_count_realized,
             win_rate=win_rate,
             open_positions=len(positions),
             drawdown_pct=None,
@@ -211,6 +253,50 @@ async def comparison() -> list[ComparisonRow]:
             exposure_usd=exposure,
         ))
     return rows
+
+
+@router.get("/report/export")
+async def export_lab_report(
+    time_range: str = Query("all_time", alias="range"),
+    export_format: str = Query("zip", alias="format"),
+):
+    """
+    Export structured lab report for human review and AI analysis (ChatGPT, etc.).
+    Formats: zip (report.json + report.csv + report.md), json, csv, md.
+    Ranges: all_time, last_1h, last_24h, last_7d.
+    """
+    if time_range not in RANGE_ALIASES:
+        raise HTTPException(
+            400,
+            detail=f"Invalid range. Use one of: {', '.join(RANGE_ALIASES.keys())}",
+        )
+    ef = (export_format or "zip").lower()
+    report = build_lab_report(time_range)
+    if ef == "json":
+        return JSONResponse(report)
+    if ef == "csv":
+        return PlainTextResponse(
+            report_to_csv(report),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="report.csv"'},
+        )
+    if ef in ("md", "markdown"):
+        return PlainTextResponse(
+            report_to_markdown(report),
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="report.md"'},
+        )
+    if ef == "zip":
+        data, fname = build_zip_bytes(report)
+        return Response(
+            content=data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+    raise HTTPException(
+        400,
+        detail="Invalid format. Use: zip, json, csv, md",
+    )
 
 
 @router.get("/settings")

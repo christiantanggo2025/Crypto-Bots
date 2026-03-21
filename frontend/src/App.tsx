@@ -5,7 +5,16 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const API = API_BASE ? `${API_BASE}/api` : "/api";
 const LAB = "/lab"; // API + LAB = full /api/lab or https://host/api/lab
 
-type TabId = "overview" | "gen1" | "gen2" | "gen3" | "gen4" | "gen5" | "comparison" | "settings";
+type TabId = "overview" | "gen1" | "gen2" | "gen3" | "gen4" | "gen5" | "gen6" | "comparison" | "settings";
+
+const TAB_TO_GEN_ID: Partial<Record<TabId, string>> = {
+  gen1: "1",
+  gen2: "2",
+  gen3: "3",
+  gen4: "4",
+  gen5: "5",
+  gen6: "6",
+};
 
 type GenStatus = {
   gen_id: string;
@@ -52,6 +61,9 @@ type Trade = {
   reason: string;
   timestamp: string;
   world_signal: string | null;
+  fee_usd?: number | null;
+  /** Sell: net gain/loss vs avg entry. Buy: null. */
+  realized_pnl_usd?: number | null;
 };
 
 type ComparisonRow = {
@@ -122,8 +134,26 @@ function formatCad(n: number) {
 function formatPct(n: number) {
   return n >= 0 ? `+${n.toFixed(2)}%` : `${n.toFixed(2)}%`;
 }
+/** Display all lab/API times in Toronto (Eastern). */
+const DISPLAY_TZ = "America/Toronto";
+
 function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return new Date(iso).toLocaleTimeString("en-CA", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: DISPLAY_TZ,
+  });
+}
+
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString("en-CA", { hour12: false, timeZone: DISPLAY_TZ });
+}
+
+/** Cash deployed on a buy (notional + fee). */
+function tradeBuySpendUsd(t: Trade): number {
+  return t.total_usd + (t.fee_usd ?? 0);
 }
 
 const TABS: { id: TabId; label: string }[] = [
@@ -133,6 +163,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "gen3", label: "Gen 3" },
   { id: "gen4", label: "Gen 4" },
   { id: "gen5", label: "Gen 5" },
+  { id: "gen6", label: "Gen 6" },
   { id: "comparison", label: "Comparison" },
   { id: "settings", label: "Settings" },
 ];
@@ -147,9 +178,9 @@ export default function App() {
   const [genDetailError, setGenDetailError] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    const isGenTab = activeTab.startsWith("gen") && activeTab !== "gen" && (activeTab === "gen1" || activeTab === "gen2" || activeTab === "gen3" || activeTab === "gen4" || activeTab === "gen5");
-    if (isGenTab) {
-      const genId = activeTab === "gen5" ? "5" : activeTab.slice(-1);
+    const genId = TAB_TO_GEN_ID[activeTab];
+    const isGenTab = Boolean(genId);
+    if (isGenTab && genId) {
       setGenDetailLoading((prev) => ({ ...prev, [genId]: true }));
       setGenDetailError((prev) => ({ ...prev, [genId]: "" }));
       const base = API + LAB + "/generations/" + genId;
@@ -229,6 +260,7 @@ export default function App() {
         {activeTab === "gen3" && <GenTab genId="3" label="Gen 3: Adaptive Bot" description="Reads market context (uptrend/sideways/downtrend). Only buys dips when context allows." detail={genDetail["3"]} summary={overview?.generations?.find((g) => g.gen_id === "3")} loading={genDetailLoading["3"]} error={genDetailError["3"]} />}
         {activeTab === "gen4" && <GenTab genId="4" label="Gen 4: AI Supervisor Bot" description="AI and news decide allow/limit/block. More selective and strategic." detail={genDetail["4"]} summary={overview?.generations?.find((g) => g.gen_id === "4")} loading={genDetailLoading["4"]} error={genDetailError["4"]} isAi />}
         {activeTab === "gen5" && <GenTab genId="5" label="Gen 5: Aggressive Scalper Bot" description="Intraday-focused: smaller positions, faster profit targets, shorter holds. Looks for quick rebound opportunities and backs off when the market is weak or messy." detail={genDetail["5"]} summary={overview?.generations?.find((g) => g.gen_id === "5")} loading={genDetailLoading["5"]} error={genDetailError["5"]} isScalper />}
+        {activeTab === "gen6" && <GenTab genId="6" label="Gen 6: Momentum Rider Bot" description="Hybrid scalper / trend rider: disciplined rebound entries, tight initial risk, staged profits, runner mode with trailing exits—captures larger moves without a single fixed take-profit." detail={genDetail["6"]} summary={overview?.generations?.find((g) => g.gen_id === "6")} loading={genDetailLoading["6"]} error={genDetailError["6"]} isMomentumRider />}
         {activeTab === "comparison" && comparison && <ComparisonTab rows={comparison} />}
         {activeTab === "settings" && <SettingsTab />}
       </main>
@@ -238,10 +270,32 @@ export default function App() {
 
 function Card({ title, value, sub, positive }: { title: string; value: string; sub?: string; positive?: boolean }) {
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "1rem" }}>
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        padding: "1rem",
+        minHeight: 96,
+        width: "100%",
+        boxSizing: "border-box",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{title}</div>
-      <div style={{ fontSize: "1.2rem", fontWeight: 600 }}>{value}</div>
-      {sub != null && <div style={{ color: positive === false ? "var(--red)" : positive === true ? "var(--green)" : "var(--text-muted)", fontSize: "0.9rem" }}>{sub}</div>}
+      <div style={{ fontSize: "1.2rem", fontWeight: 600, marginTop: "0.25rem", flex: 1, display: "flex", alignItems: "center" }}>{value}</div>
+      <div
+        style={{
+          fontSize: "0.9rem",
+          minHeight: "1.35em",
+          marginTop: "0.15rem",
+          lineHeight: 1.35,
+          color: sub != null ? (positive === false ? "var(--red)" : positive === true ? "var(--green)" : "var(--text-muted)") : "var(--text-muted)",
+        }}
+      >
+        {sub != null ? sub : "\u00a0"}
+      </div>
     </div>
   );
 }
@@ -249,6 +303,52 @@ function Card({ title, value, sub, positive }: { title: string; value: string; s
 const STARTING_BALANCE = 10_000;
 
 function OverviewTab({ overview, market }: { overview: LabOverview; market: MarketTick[] }) {
+  const [reportRange, setReportRange] = useState("all_time");
+  const [reportFormat, setReportFormat] = useState("zip");
+  const [reportDownloading, setReportDownloading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+
+  async function downloadAnalysisReport() {
+    setReportError(null);
+    setReportDownloading(true);
+    try {
+      const url = `${API}${LAB}/report/export?range=${encodeURIComponent(reportRange)}&format=${encodeURIComponent(reportFormat)}`;
+      const r = await fetch(url);
+      if (!r.ok) {
+        const t = await r.text();
+        let msg = t || r.statusText;
+        try {
+          const j = JSON.parse(t) as { detail?: string | unknown };
+          if (j?.detail != null) msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+        } catch {
+          /* use raw text */
+        }
+        throw new Error(msg.slice(0, 400));
+      }
+      const blob = await r.blob();
+      const cd = r.headers.get("Content-Disposition");
+      let name =
+        reportFormat === "zip"
+          ? "crypto_lab_report.zip"
+          : reportFormat === "json"
+            ? "report.json"
+            : reportFormat === "csv"
+              ? "report.csv"
+              : "report.md";
+      const m = cd?.match(/filename="([^"]+)"/);
+      if (m) name = m[1];
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e: unknown) {
+      setReportError(e instanceof Error ? e.message : "Download failed");
+    } finally {
+      setReportDownloading(false);
+    }
+  }
+
   const gens = overview.generations;
   const values = gens.length ? gens.map((g) => g.total_value_usd) : [STARTING_BALANCE];
   const scaleMin = Math.max(0, Math.min(STARTING_BALANCE, ...values) - 500);
@@ -311,6 +411,70 @@ function OverviewTab({ overview, market }: { overview: LabOverview; market: Mark
           </div>
         ))}
       </div>
+      <h3 style={{ fontSize: "1rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>Analysis report</h3>
+      <div
+        style={{
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: "1rem 1.25rem",
+          marginBottom: "2rem",
+        }}
+      >
+        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "0 0 1rem" }}>
+          Export structured data for spreadsheets, quick reading, or AI (ChatGPT). ZIP includes <code style={{ fontSize: "0.8rem" }}>report.json</code>,{" "}
+          <code style={{ fontSize: "0.8rem" }}>report.csv</code>, and <code style={{ fontSize: "0.8rem" }}>report.md</code>. API:{" "}
+          <code style={{ fontSize: "0.75rem" }}>GET /api/lab/report/export</code>
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.75rem" }}>
+          <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+            Range{" "}
+            <select
+              value={reportRange}
+              onChange={(e) => setReportRange(e.target.value)}
+              style={{ marginLeft: 4, padding: "0.35rem 0.5rem", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface2)", color: "inherit" }}
+            >
+              <option value="all_time">All time</option>
+              <option value="last_1h">Last 1 hour</option>
+              <option value="last_24h">Last 24 hours</option>
+              <option value="last_7d">Last 7 days</option>
+            </select>
+          </label>
+          <label style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+            Format{" "}
+            <select
+              value={reportFormat}
+              onChange={(e) => setReportFormat(e.target.value)}
+              style={{ marginLeft: 4, padding: "0.35rem 0.5rem", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface2)", color: "inherit" }}
+            >
+              <option value="zip">ZIP (default)</option>
+              <option value="json">JSON only</option>
+              <option value="csv">CSV only</option>
+              <option value="md">Markdown only</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => void downloadAnalysisReport()}
+            disabled={reportDownloading}
+            style={{
+              padding: "0.45rem 1rem",
+              borderRadius: 8,
+              border: "none",
+              background: "var(--accent)",
+              color: "#fff",
+              fontWeight: 600,
+              cursor: reportDownloading ? "wait" : "pointer",
+              opacity: reportDownloading ? 0.7 : 1,
+            }}
+          >
+            {reportDownloading ? "Downloading…" : "Download Analysis Report"}
+          </button>
+        </div>
+        {reportError ? (
+          <div style={{ marginTop: "0.75rem", fontSize: "0.85rem", color: "var(--red)" }}>{reportError}</div>
+        ) : null}
+      </div>
       <h3 style={{ fontSize: "1rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>Market</h3>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "0.75rem", marginBottom: "2rem" }}>
         {market.slice(0, 6).map((t) => (
@@ -347,6 +511,7 @@ function GenTab({
   error,
   isAi,
   isScalper,
+  isMomentumRider,
 }: {
   genId: string;
   label: string;
@@ -357,6 +522,7 @@ function GenTab({
   error?: string;
   isAi?: boolean;
   isScalper?: boolean;
+  isMomentumRider?: boolean;
 }) {
   const [resetting, setResetting] = useState(false);
   const status = detail?.status;
@@ -368,8 +534,9 @@ function GenTab({
   const pnlUsd = status?.total_pnl_usd ?? summary?.total_pnl_usd;
   const pnlPct = status?.total_pnl_percent ?? summary?.total_pnl_percent;
   const tradeCountToday = status?.trade_count_today ?? summary?.trade_count_today ?? 0;
-  const winCount = trades.filter((t) => t.side === "sell" && t.total_usd > 0).length;
-  const winRate = trades.length ? (winCount / trades.length) * 100 : null;
+  const sellsWithPnl = trades.filter((t) => t.side === "sell" && t.realized_pnl_usd != null);
+  const winCount = sellsWithPnl.filter((t) => (t.realized_pnl_usd ?? 0) > 0).length;
+  const winRate = sellsWithPnl.length ? (winCount / sellsWithPnl.length) * 100 : null;
   const avgPerTrade = trades.length && pnlUsd != null ? pnlUsd / trades.length : null;
   const exposureUsd = positions.reduce((s, p) => s + p.value_usd, 0);
   const unrealizedPnl = positions.reduce((s, p) => s + p.pnl_usd, 0);
@@ -421,6 +588,136 @@ function GenTab({
               <div><span style={{ color: "var(--text-muted)" }}>Exposure</span><br />{formatUsd(exposureUsd)}</div>
               <div><span style={{ color: "var(--text-muted)" }}>Realized P&L</span><br />{realizedPnl != null ? formatUsd(realizedPnl) : "—"}</div>
               <div><span style={{ color: "var(--text-muted)" }}>Unrealized P&L</span><br /><span style={{ color: unrealizedPnl >= 0 ? "var(--green)" : "var(--red)" }}>{formatUsd(unrealizedPnl)}</span></div>
+            </div>
+          </div>
+        </div>
+      )}
+      {isMomentumRider && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          <h3 style={{ fontSize: "1rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>Gen 6: Momentum rider status</h3>
+          <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10, padding: "1.25rem", display: "grid", gap: "1rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "0.75rem", fontSize: "0.9rem" }}>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Market regime</div>
+                <div style={{ fontWeight: 600 }}>{status?.gen6_market_regime ?? "—"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Runner mode</div>
+                <div style={{ fontWeight: 600, color: status?.gen6_any_runner ? "var(--green)" : "var(--text)" }}>{status?.gen6_any_runner ? "Active (≥1 position)" : "None"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>New entries</div>
+                <div style={{ fontWeight: 600 }}>{status?.gen6_protective_entries ? "Paused (weak market)" : "Allowed"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Avg 24h</div>
+                <div style={{ fontFamily: "var(--font-mono)" }}>{status?.gen6_market_avg_24h != null ? formatPct(status.gen6_market_avg_24h) : "—"}</div>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Strategy summary</div>
+              <div style={{ fontSize: "0.95rem" }}>{status?.gen6_strategy_summary ?? "No summary from last cycle yet."}</div>
+            </div>
+            {(status?.gen6_last_exit_reason || status?.gen6_last_exit_tag) && (
+              <div style={{ padding: "0.75rem", background: "var(--surface)", borderRadius: 8, border: "1px solid var(--border)" }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Latest exit (last cycle)</div>
+                <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>{status?.gen6_last_exit_reason ?? "—"}</div>
+                {status?.gen6_last_exit_tag && (
+                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: "0.25rem" }}>{String(status.gen6_last_exit_tag)}</div>
+                )}
+              </div>
+            )}
+            {status?.gen6_evaluation_metrics && typeof status.gen6_evaluation_metrics === "object" && (
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Tuning &amp; evaluation metrics</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "0.5rem 1rem", fontSize: "0.85rem", fontFamily: "var(--font-mono)" }}>
+                  {(() => {
+                    const ev = status.gen6_evaluation_metrics as Record<string, unknown>;
+                    const n = (k: string) => (typeof ev[k] === "number" ? ev[k] as number : null);
+                    const fmt = (k: string) => {
+                      const v = n(k);
+                      return v != null ? String(v) : "—";
+                    };
+                    const fmtPct = (k: string) => {
+                      const v = n(k);
+                      return v != null ? `${(v as number).toFixed(2)}%` : "—";
+                    };
+                    const fmtUsd = (k: string) => {
+                      const v = n(k);
+                      return v != null ? formatUsd(v as number) : "—";
+                    };
+                    return (
+                      <>
+                        <span>Runner activations: {fmt("runner_activations")}</span>
+                        <span>Protected activations: {fmt("protected_activations")}</span>
+                        <span>Scale-outs: {fmt("scaleouts")}</span>
+                        <span>Exits — trailing: {fmt("exits_trailing")}</span>
+                        <span>Exits — timeout: {fmt("exits_timeout")}</span>
+                        <span>Exits — weak mom.: {fmt("exits_weak_momentum")}</span>
+                        <span>Exits — runner fade: {fmt("exits_runner_weak")}</span>
+                        <span>Exits — failed rebound: {fmt("exits_failed_rebound")}</span>
+                        <span style={{ gridColumn: "1 / -1", marginTop: "0.35rem", paddingTop: "0.5rem", borderTop: "1px solid var(--border)" }} />
+                        <span>Avg peak P&amp;L% (legs): {fmtPct("avg_peak_pnl_pct")}</span>
+                        <span>Avg P&amp;L% at exit: {fmtPct("avg_pnl_at_exit_pct")}</span>
+                        <span>Avg giveback from peak%: {fmtPct("avg_giveback_pct")}</span>
+                        <span>Avg cycles (winners): {fmt("avg_cycles_winners")}</span>
+                        <span>Avg cycles (losers / flat exit): {fmt("avg_cycles_losers")}</span>
+                        <span>Avg realized $ / Gen6 sell: {fmtUsd("avg_realized_pnl_usd")}</span>
+                        <span>Gen6 sells w/ P&amp;L: {fmt("gen6_scored_sell_count")}</span>
+                      </>
+                    );
+                  })()}
+                </div>
+                <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.75rem", marginBottom: 0 }}>
+                  Counters accrue since bot state was last reset. Leg averages use recent closed legs (incl. partial scale-outs in history).
+                </p>
+              </div>
+            )}
+            {Array.isArray(status?.gen6_position_snapshots) && status.gen6_position_snapshots.length > 0 && (
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Open positions (per-symbol state)</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Symbol</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Stage</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Runner</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Prot.</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Scaled</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>P&amp;L%</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Max seen%</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>DD peak%</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Cyc</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Trail%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(status.gen6_position_snapshots as any[]).map((row: any, i: number) => (
+                        <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{(row.symbol || "").replace("USDT", "")}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.stage ?? "—"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.runner_active ? "yes" : "no"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.protected ? "yes" : "no"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.scaled_out ? "yes" : "no"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.pnl_pct != null ? formatPct(row.pnl_pct) : "—"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.max_pnl_pct_seen != null ? formatPct(row.max_pnl_pct_seen) : "—"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.drawdown_from_peak_pct != null ? formatPct(row.drawdown_from_peak_pct) : "—"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.cycles_held ?? "—"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.trail_threshold_pct != null ? `${Number(row.trail_threshold_pct).toFixed(2)}%` : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "0.75rem", fontFamily: "var(--font-mono)", fontSize: "0.9rem" }}>
+              <div><span style={{ color: "var(--text-muted)" }}>Total P&amp;L</span><br />{pnlUsd != null ? formatUsd(pnlUsd) : "—"}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Win rate (scored sells)</span><br />{winRate != null ? `${winRate.toFixed(1)}%` : "—"}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Trades</span><br />{trades.length}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Exposure</span><br />{formatUsd(exposureUsd)}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Unrealized P&amp;L</span><br /><span style={{ color: unrealizedPnl >= 0 ? "var(--green)" : "var(--red)" }}>{formatUsd(unrealizedPnl)}</span></div>
             </div>
           </div>
         </div>
@@ -509,7 +806,7 @@ function GenTab({
               <tbody>
                 {[...(status.gen4_decision_history as any[])].reverse().slice(0, 25).map((h, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td style={{ padding: "0.5rem 0.75rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h.timestamp ? new Date(h.timestamp).toLocaleString() : "—"}</td>
+                    <td style={{ padding: "0.5rem 0.75rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h.timestamp ? formatDateTime(h.timestamp) : "—"}</td>
                     <td style={{ padding: "0.5rem 0.75rem", fontWeight: 600, color: "var(--accent)" }}>{h.decision ?? "—"}</td>
                     <td style={{ padding: "0.5rem 0.75rem" }}>{h.decision_source === "ai_only" ? "AI only" : h.decision_source === "ai_plus_override" ? "AI + override" : h.decision_source === "fallback_limit" ? "Fallback" : h.decision_source ?? "—"}</td>
                     <td style={{ padding: "0.5rem 0.75rem" }}>{h.override_applied === true ? "Yes" : "No"}</td>
@@ -526,11 +823,19 @@ function GenTab({
           </div>
         </>
       )}
-      <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center", marginBottom: "1rem" }}>
-        <Card title="Balance" value={balance != null ? formatUsd(balance) : "—"} />
-        <Card title="Portfolio value" value={totalValue != null ? formatUsd(totalValue) : "—"} />
-        <Card title="P&L" value={pnlUsd != null ? formatUsd(pnlUsd) : "—"} sub={pnlPct != null ? formatPct(pnlPct) : undefined} positive={pnlUsd != null ? pnlUsd >= 0 : undefined} />
-        <Card title="Trades today" value={String(tradeCountToday)} />
+      <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "stretch", marginBottom: "1rem" }}>
+        <div style={{ flex: "1 1 150px", minWidth: 140, maxWidth: 260, display: "flex" }}>
+          <Card title="Balance" value={balance != null ? formatUsd(balance) : "—"} />
+        </div>
+        <div style={{ flex: "1 1 150px", minWidth: 140, maxWidth: 260, display: "flex" }}>
+          <Card title="Portfolio value" value={totalValue != null ? formatUsd(totalValue) : "—"} />
+        </div>
+        <div style={{ flex: "1 1 150px", minWidth: 140, maxWidth: 260, display: "flex" }}>
+          <Card title="P&L" value={pnlUsd != null ? formatUsd(pnlUsd) : "—"} sub={pnlPct != null ? formatPct(pnlPct) : undefined} positive={pnlUsd != null ? pnlUsd >= 0 : undefined} />
+        </div>
+        <div style={{ flex: "1 1 150px", minWidth: 140, maxWidth: 260, display: "flex" }}>
+          <Card title="Trades today" value={String(tradeCountToday)} />
+        </div>
         <button
           onClick={async () => {
             setResetting(true);
@@ -539,7 +844,7 @@ function GenTab({
             window.location.reload();
           }}
           disabled={resetting}
-          style={{ padding: "0.5rem 1rem", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", cursor: resetting ? "not-allowed" : "pointer" }}
+          style={{ padding: "0.5rem 1rem", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text)", cursor: resetting ? "not-allowed" : "pointer", alignSelf: "center" }}
         >
           {resetting ? "Resetting…" : "Reset to fresh balance"}
         </button>
@@ -565,13 +870,35 @@ function GenTab({
       <h3 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>Recent trades</h3>
       {trades.length ? (
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
-          <thead><tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}><th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Time</th><th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Side</th><th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Symbol</th><th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Why</th></tr></thead>
+          <thead>
+            <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}>
+              <th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Time</th>
+              <th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Side</th>
+              <th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Symbol</th>
+              <th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>Gain / loss</th>
+              <th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Why</th>
+            </tr>
+          </thead>
           <tbody>
             {trades.slice(0, 20).map((t) => (
               <tr key={t.id} style={{ borderBottom: "1px solid var(--border)" }}>
                 <td style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>{formatTime(t.timestamp)}</td>
                 <td style={{ padding: "0.5rem 1rem", color: t.side === "buy" ? "var(--green)" : "var(--red)" }}>{t.side.toUpperCase()}</td>
                 <td style={{ padding: "0.5rem 1rem" }}>{t.symbol.replace("USDT", "")}</td>
+                <td style={{ padding: "0.5rem 1rem", fontVariantNumeric: "tabular-nums" }}>
+                  {t.side === "sell" && t.realized_pnl_usd != null ? (
+                    <span style={{ fontWeight: 600, color: t.realized_pnl_usd >= 0 ? "var(--green)" : "var(--red)" }} title="Realized vs average entry (after fee)">
+                      {t.realized_pnl_usd >= 0 ? "+" : "−"}
+                      {formatUsd(Math.abs(t.realized_pnl_usd))}
+                    </span>
+                  ) : t.side === "buy" ? (
+                    <span style={{ color: "var(--text-muted)" }} title="Cash deployed; P&amp;L is unrealized until you sell">
+                      {formatUsd(-tradeBuySpendUsd(t))} out
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--text-muted)" }}>—</span>
+                  )}
+                </td>
                 <td style={{ padding: "0.5rem 1rem" }}>{t.reason}</td>
               </tr>
             ))}
@@ -580,16 +907,16 @@ function GenTab({
       ) : (
         <p style={{ color: "var(--text-muted)" }}>No trades yet.</p>
       )}
-      {genId === "3" && (
+      {(genId === "3" || genId === "6") && (
         <>
-          <h3 style={{ fontSize: "1rem", marginTop: "1.5rem", marginBottom: "0.5rem" }}>Why no trade</h3>
+          <h3 style={{ fontSize: "1rem", marginTop: "1.5rem", marginBottom: "0.5rem" }}>{genId === "6" ? "Recent decisions & reasoning" : "Why no trade"}</h3>
           {decisions.length ? (
             <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
               <thead><tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}><th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Time</th><th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Symbol</th><th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Action</th><th style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>Reason</th></tr></thead>
               <tbody>
                 {[...decisions].reverse().slice(0, 20).map((d, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>{d.timestamp ? new Date(d.timestamp).toLocaleString() : "—"}</td>
+                    <td style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>{d.timestamp ? formatDateTime(d.timestamp) : "—"}</td>
                     <td style={{ padding: "0.5rem 1rem" }}>{(d.symbol || "").replace("USDT", "")}</td>
                     <td style={{ padding: "0.5rem 1rem", color: "var(--text-muted)" }}>{d.action || "skip"}</td>
                     <td style={{ padding: "0.5rem 1rem" }}>{d.reason || "—"}</td>
@@ -598,7 +925,11 @@ function GenTab({
               </tbody>
             </table>
           ) : (
-            <p style={{ color: "var(--text-muted)" }}>No decisions recorded yet. Skip reasons will appear here when the bot chooses not to buy.</p>
+            <p style={{ color: "var(--text-muted)" }}>
+              {genId === "6"
+                ? "No decisions logged yet. Entries, exits, scale-outs, and status updates appear here each cycle."
+                : "No decisions recorded yet. Skip reasons will appear here when the bot chooses not to buy."}
+            </p>
           )}
         </>
       )}
@@ -610,7 +941,10 @@ function ComparisonTab({ rows }: { rows: ComparisonRow[] }) {
   const sorted = [...rows].sort((a, b) => b.pnl_usd - a.pnl_usd);
   return (
     <>
-      <h2 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "1rem" }}>Side-by-side comparison</h2>
+      <h2 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "0.5rem" }}>Side-by-side comparison</h2>
+      <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem", maxWidth: 800 }}>
+        <strong>Win rate</strong> = percentage of <strong>sells</strong> that locked in a <strong>profit</strong> (realized P&amp;L vs average entry, after fees). Buys are not part of this ratio. If no sells have P&amp;L recorded yet, the rate shows &quot;—&quot;.
+      </p>
       <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--font-mono)", fontSize: "0.9rem" }}>
           <thead>
@@ -746,6 +1080,87 @@ function SettingsTab() {
               <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                 <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Min trade USD</span>
                 <input type="number" min="0" value={ov.min_trade_usd ?? 25} onChange={(e) => update5("min_trade_usd", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+            </div>
+          );
+        })()}
+      </section>
+      <section style={{ marginBottom: "2rem" }}>
+        <h3 style={{ fontSize: "1rem", marginBottom: "0.75rem" }}>Gen 6: Momentum Rider Bot</h3>
+        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>Staged profit, runner mode, trailing exits, partial scale-out. Tune risk and pacing.</p>
+        {(() => {
+          const gens = form.generations || {};
+          const g6 = gens["6"] || { enabled: true, label: "Momentum Rider Bot", overrides: {} };
+          const ov = g6.overrides || {};
+          const update6 = (key: string, val: any) => setForm((f) => {
+            if (!f) return f;
+            const generations = { ...f.generations };
+            generations["6"] = { ...generations["6"], overrides: { ...(generations["6"]?.overrides || {}), [key]: val } };
+            return { ...f, generations };
+          });
+          const update6Enabled = (v: boolean) => setForm((f) => {
+            if (!f) return f;
+            const generations = { ...f.generations };
+            generations["6"] = { ...generations["6"], enabled: v };
+            return { ...f, generations };
+          });
+          return (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "1rem", padding: "1rem", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <input type="checkbox" checked={g6.enabled !== false} onChange={(e) => update6Enabled(e.target.checked)} />
+                <span style={{ fontSize: "0.9rem" }}>Enabled</span>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Starting balance ($)</span>
+                <input type="number" step="100" min="0" value={ov.starting_balance ?? 10000} onChange={(e) => update6("starting_balance", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Position size %</span>
+                <input type="number" step="0.5" min="0.5" value={ov.position_size_pct ?? 5} onChange={(e) => update6("position_size_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Cooldown (min)</span>
+                <input type="number" step="1" min="0" value={ov.cooldown_minutes ?? 7} onChange={(e) => update6("cooldown_minutes", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Stop loss % (position)</span>
+                <input type="number" step="0.05" value={ov.stop_loss_pct ?? -1.12} onChange={(e) => update6("stop_loss_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Min dip % (entry 24h)</span>
+                <input type="number" step="0.05" value={ov.min_price_drop_pct ?? -1.08} onChange={(e) => update6("min_price_drop_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Protected profit % (stage 1)</span>
+                <input type="number" step="0.05" value={ov.gen6_protect_profit_pct ?? 0.30} onChange={(e) => update6("gen6_protect_profit_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Runner activation %</span>
+                <input type="number" step="0.05" value={ov.gen6_runner_activation_pct ?? 0.62} onChange={(e) => update6("gen6_runner_activation_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Scale-out at % profit</span>
+                <input type="number" step="0.05" value={ov.gen6_scaleout_pct ?? 0.55} onChange={(e) => update6("gen6_scaleout_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Scale-out fraction (0–1)</span>
+                <input type="number" step="0.05" min="0" max="1" value={ov.gen6_scaleout_fraction ?? 0.38} onChange={(e) => update6("gen6_scaleout_fraction", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Max hold (cycles)</span>
+                <input type="number" min="5" value={ov.gen6_max_hold_cycles ?? 36} onChange={(e) => update6("gen6_max_hold_cycles", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Stall cycles (weak exit)</span>
+                <input type="number" min="1" value={ov.gen6_stall_cycles ?? 9} onChange={(e) => update6("gen6_stall_cycles", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Stall epsilon % (flat detection)</span>
+                <input type="number" step="0.01" min="0.02" value={ov.gen6_stall_epsilon_pct ?? 0.07} onChange={(e) => update6("gen6_stall_epsilon_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Max trades / day</span>
+                <input type="number" min="1" value={ov.max_trades_per_day ?? 40} onChange={(e) => update6("max_trades_per_day", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
               </label>
             </div>
           );

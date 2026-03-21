@@ -20,6 +20,10 @@ class Trade(BaseModel):
     reason: str
     timestamp: datetime
     world_signal: Optional[str] = None
+    fee_usd: Optional[float] = None
+    """Trading fee paid on this fill (USD)."""
+    realized_pnl_usd: Optional[float] = None
+    """On sells: net proceeds minus cost basis at avg entry (USD). Buys: null."""
 
 
 class Position(BaseModel):

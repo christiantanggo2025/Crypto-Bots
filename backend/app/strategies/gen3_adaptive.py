@@ -7,6 +7,7 @@ Gen 3: Adaptive bot. Uses simple market context (trend) to decide when dip-buyin
 from datetime import datetime, timedelta
 
 from app.models import MarketTick, OrderSide
+from app.time_toronto import UTC_MIN, utc_now
 
 
 def _market_context(ticks: list[MarketTick]) -> str:
@@ -56,14 +57,14 @@ def get_signals(
     if total_value <= 0:
         total_value = balance_usd
 
-    now = datetime.utcnow()
+    now = utc_now()
     cooldown_delta = timedelta(minutes=cooldown_min)
 
     for t in ticks:
         symbol = t.symbol
         if symbol not in enabled:
             continue
-        if cooldown_min > 0 and (now - last_trade.get(symbol, datetime.min)) < cooldown_delta:
+        if cooldown_min > 0 and (now - last_trade.get(symbol, UTC_MIN)) < cooldown_delta:
             decisions.append({"symbol": symbol, "action": "skip", "reason": "Cooldown active; waiting before re-entering."})
             continue
 

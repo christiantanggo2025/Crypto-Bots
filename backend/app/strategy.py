@@ -5,6 +5,7 @@ Uses persistent trading params so the UI can control behavior.
 from datetime import datetime, timedelta
 
 from app.models import MarketTick, OrderSide
+from app.time_toronto import UTC_MIN, utc_now
 from app.trading_params import load_params, get_enabled_symbols
 
 
@@ -37,14 +38,14 @@ def get_signals(
     if total_value <= 0:
         total_value = balance_usd
 
-    now = datetime.utcnow()
+    now = utc_now()
     cooldown_delta = timedelta(minutes=cooldown_min)
 
     for t in ticks:
         symbol = t.symbol
         if symbol not in enabled:
             continue
-        if cooldown_min > 0 and (now - last_trade.get(symbol, datetime.min)) < cooldown_delta:
+        if cooldown_min > 0 and (now - last_trade.get(symbol, UTC_MIN)) < cooldown_delta:
             continue
 
         price = t.price

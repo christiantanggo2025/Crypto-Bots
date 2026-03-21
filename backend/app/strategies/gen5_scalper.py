@@ -5,6 +5,7 @@ shorter holds. Looks for small repeatable opportunities; backs off when market i
 from datetime import datetime, timedelta
 
 from app.models import MarketTick, OrderSide
+from app.time_toronto import UTC_MIN, utc_now
 
 
 def get_signals(
@@ -60,7 +61,7 @@ def get_signals(
         activity_mode = "active"
         strategy_summary = "Looking for quick rebound opportunities and short intraday profit windows."
 
-    now = datetime.utcnow()
+    now = utc_now()
     cooldown_delta = timedelta(minutes=cooldown_min)
     current_positions_count = sum(1 for s, p in positions.items() if (p.get("quantity") or 0) > 0)
     current_exposure = sum(
@@ -73,7 +74,7 @@ def get_signals(
         symbol = t.symbol
         if symbol not in enabled:
             continue
-        if cooldown_min > 0 and (now - last_trade.get(symbol, datetime.min)) < cooldown_delta:
+        if cooldown_min > 0 and (now - last_trade.get(symbol, UTC_MIN)) < cooldown_delta:
             continue
 
         price = t.price

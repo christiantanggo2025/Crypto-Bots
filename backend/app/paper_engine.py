@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.models import OrderSide, Position, Trade
+from app.time_toronto import utc_now
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -27,7 +28,7 @@ def _default_state(initial_balance: float, gen_id: str) -> dict:
         "trades": [],
         "decisions": [],
         "entry_count_per_symbol": {},
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": utc_now().isoformat(),
     }
 
 
@@ -166,10 +167,15 @@ def execute_order(
         ) / p["quantity"] if p["quantity"] else fill_price
         )
         entry_count[symbol] = entry_count.get(symbol, 0) + 1
+        realized_pnl_usd = None
     else:
         pos = positions.get(symbol, {"quantity": 0.0, "avg_price": 0.0})
         if pos["quantity"] < quantity:
             return None
+        avg_entry = float(pos["avg_price"] or 0.0)
+        cost_basis = avg_entry * quantity
+        net_proceeds = total_usd - fee
+        realized_pnl_usd = net_proceeds - cost_basis
         state["balance_usd"] += total_usd - fee
         pos["quantity"] -= quantity
         if pos["quantity"] <= 0:
@@ -184,8 +190,10 @@ def execute_order(
         price=fill_price,
         total_usd=total_usd,
         reason=reason,
-        timestamp=datetime.utcnow(),
+        timestamp=utc_now(),
         world_signal=world_signal,
+        fee_usd=fee,
+        realized_pnl_usd=realized_pnl_usd,
     )
     state["trades"].append(trade.model_dump(mode="json"))
     return trade

@@ -60,6 +60,36 @@ GEN_DEFAULTS = {
             "max_trades_per_day": 30,
         },
     },
+    "6": {
+        "enabled": True,
+        "label": "Momentum Rider Bot",
+        "overrides": {
+            "position_size_pct": 5.0,
+            "cooldown_minutes": 8.0,
+            "max_open_positions": 4,
+            "max_exposure_per_coin_pct": 18.0,
+            "max_total_exposure_pct": 65.0,
+            "min_price_drop_pct": -1.08,
+            "min_trade_usd": 40.0,
+            "max_trade_pct_of_balance": 12.0,
+            "stop_loss_pct": -1.12,
+            "max_trades_per_day": 40,
+            "cooldown_minutes": 7.0,
+            "gen6_protect_profit_pct": 0.30,
+            "gen6_runner_activation_pct": 0.62,
+            "gen6_scaleout_pct": 0.55,
+            "gen6_scaleout_fraction": 0.38,
+            "gen6_trail_tight_pct": 0.28,
+            "gen6_trail_runner_weak_pct": 0.36,
+            "gen6_trail_runner_normal_pct": 0.55,
+            "gen6_trail_runner_strong_pct": 0.72,
+            "gen6_max_hold_cycles": 36,
+            "gen6_stall_cycles": 9,
+            "gen6_runner_momentum_min_24h": -0.22,
+            "gen6_catastrophic_entry_cutoff_pct": -10.5,
+            "gen6_stall_epsilon_pct": 0.07,
+        },
+    },
 }
 
 API_KEYS_DEFAULTS = {
@@ -126,7 +156,7 @@ def get_gen_config(gen_id: str) -> dict:
 
 
 def get_all_gen_configs() -> dict[str, dict]:
-    return {g: get_gen_config(g) for g in ("1", "2", "3", "4", "5")}
+    return {g: get_gen_config(g) for g in ("1", "2", "3", "4", "5", "6")}
 
 
 def get_api_keys() -> dict[str, str]:
