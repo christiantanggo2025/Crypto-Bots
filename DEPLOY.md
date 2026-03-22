@@ -47,7 +47,7 @@ If you skip a volume, the lab still runs but state resets when the service resta
 
 | Name | Value |
 |------|--------|
-| **`RAILWAY_API_BASE_URL`** | **Recommended.** Your Railway app origin only: `https://your-app-production-xxxx.up.railway.app` (no trailing slash, no `/api`). The browser calls **same-origin** `/api/...` on Vercel; a serverless function proxies to Railway (see `frontend/api/[...slug].ts`). Works when your laptop is closed. |
+| **`RAILWAY_API_BASE_URL`** | **Required for same-origin `/api`.** Railway origin only: `https://your-app-production-xxxx.up.railway.app` (no trailing slash, no `/api`). Vercel **Edge Middleware** (`frontend/middleware.ts`) proxies `/api/*` to Railway. In Vercel → Env Vars, enable this variable for **Edge** if the UI shows that option. |
 | `VITE_API_BASE_URL` | **Optional alternative.** Same URL as above — bakes the Railway origin into the JS bundle and calls Railway **directly** from the browser (needs CORS `*`, which we allow). Redeploy after every change. |
 
 5. **Redeploy** after adding env vars. Open your **Vercel** URL on your phone; Overview should show **CLOUD WORKER LIVE** when Railway is cycling.
