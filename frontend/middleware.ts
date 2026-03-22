@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * Vercel Edge Middleware: proxy /api/* → Railway (fixes 404 when Node api/[...slug] is not invoked on Vite deploys).
  * Requires RAILWAY_API_BASE_URL in Vercel env. In dashboard, enable this var for Edge if your UI offers it.
