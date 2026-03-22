@@ -45,6 +45,7 @@ lab_status: dict[str, dict] = {
     "4": {"last_run": None, "trade_count_today": 0, "last_decision": None, "last_reasoning": None, "last_news_context": None},
     "5": {"last_run": None, "trade_count_today": 0},
     "6": {"last_run": None, "trade_count_today": 0},
+    "7": {"last_run": None, "trade_count_today": 0},
 }
 lab_last_cycle: datetime | None = None
 
