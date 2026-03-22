@@ -37,7 +37,7 @@ from app.lab_report import (
 
 router = APIRouter(prefix="/api/lab", tags=["lab"])
 
-LAB_GEN_IDS = ("1", "2", "3", "4", "5", "6")
+LAB_GEN_IDS = ("1", "2", "3", "4", "5", "6", "7")
 
 
 def _recent_activity(limit: int = 20) -> list[dict]:
@@ -174,6 +174,18 @@ async def gen_status_detail(gen_id: str) -> dict:
     gen6_last_exit = state.get("gen6_last_exit") if gen_id == "6" else None
     gen6_last_exit_reason = state.get("gen6_last_exit_reason") if gen_id == "6" else None
     gen6_last_exit_tag = state.get("gen6_last_exit_tag") if gen_id == "6" else None
+    gen7_strategy_summary = state.get("gen7_strategy_summary") if gen_id == "7" else None
+    gen7_market_regime = state.get("gen7_market_regime") if gen_id == "7" else None
+    gen7_market_avg_24h = state.get("gen7_market_avg_24h") if gen_id == "7" else None
+    gen7_broad_weakness = state.get("gen7_broad_weakness") if gen_id == "7" else None
+    gen7_market_look = state.get("gen7_market_look") if gen_id == "7" else None
+    gen7_defensive_entries = state.get("gen7_defensive_entries") if gen_id == "7" else None
+    gen7_operational_state = state.get("gen7_operational_state") if gen_id == "7" else None
+    gen7_position_snapshots = state.get("gen7_position_snapshots") if gen_id == "7" else None
+    gen7_evaluation_metrics = state.get("gen7_evaluation_metrics") if gen_id == "7" else None
+    gen7_last_exit = state.get("gen7_last_exit") if gen_id == "7" else None
+    gen7_last_exit_reason = state.get("gen7_last_exit_reason") if gen_id == "7" else None
+    gen7_last_exit_tag = state.get("gen7_last_exit_tag") if gen_id == "7" else None
     return {
         **gs,
         "label": config.get("label", f"Gen {gen_id}"),
@@ -202,6 +214,18 @@ async def gen_status_detail(gen_id: str) -> dict:
         "gen6_last_exit": gen6_last_exit,
         "gen6_last_exit_reason": gen6_last_exit_reason,
         "gen6_last_exit_tag": gen6_last_exit_tag,
+        "gen7_strategy_summary": gen7_strategy_summary,
+        "gen7_market_regime": gen7_market_regime,
+        "gen7_market_avg_24h": gen7_market_avg_24h,
+        "gen7_broad_weakness": gen7_broad_weakness,
+        "gen7_market_look": gen7_market_look,
+        "gen7_defensive_entries": gen7_defensive_entries,
+        "gen7_operational_state": gen7_operational_state,
+        "gen7_position_snapshots": gen7_position_snapshots,
+        "gen7_evaluation_metrics": gen7_evaluation_metrics,
+        "gen7_last_exit": gen7_last_exit,
+        "gen7_last_exit_reason": gen7_last_exit_reason,
+        "gen7_last_exit_tag": gen7_last_exit_tag,
         "trades": [t.model_dump(mode="json") for t in trades],
         "decisions": decisions,
     }

@@ -1,7 +1,8 @@
 """
-Gen 6: Momentum Rider Bot — hybrid scalper / trend rider.
-Tuned for: disciplined entries, early protection, real runner promotion, adaptive trails,
-efficient weak exits, sensible timeouts, partial scale-out that preserves upside.
+Gen 6: Momentum Rider Bot — rebound entry, protected state, runner mode, exit on real weakness.
+
+Entry: dip context (24h) + lab-cycle rebound/stabilization vs prior tick — not raw dip-only buys.
+Hold: protect → runner → trail; less eager than Gen 7 micro scalps.
 """
 from __future__ import annotations
 
@@ -109,19 +110,23 @@ def get_signals(
     stop_loss_pct = float(config.get("stop_loss_pct", -1.12))
     max_trades_per_day = int(config.get("max_trades_per_day", 40) or 0)
 
-    protect_pct = float(config.get("gen6_protect_profit_pct", 0.30))
-    runner_pct = float(config.get("gen6_runner_activation_pct", 0.62))
-    scaleout_pct = float(config.get("gen6_scaleout_pct", 0.55))
-    scaleout_fraction = float(config.get("gen6_scaleout_fraction", 0.38))
-    trail_tight = float(config.get("gen6_trail_tight_pct", 0.28))
-    trail_runner_weak = float(config.get("gen6_trail_runner_weak_pct", 0.36))
-    trail_runner_mixed = float(config.get("gen6_trail_runner_normal_pct", 0.55))
-    trail_runner_strong = float(config.get("gen6_trail_runner_strong_pct", 0.72))
-    max_hold_cycles = int(config.get("gen6_max_hold_cycles", 36))
-    stall_cycles_exit = int(config.get("gen6_stall_cycles", 9))
-    runner_mom_min = float(config.get("gen6_runner_momentum_min_24h", -0.22))
+    protect_pct = float(config.get("gen6_protect_profit_pct", 0.42))
+    protect_min_cycles = int(config.get("gen6_protect_min_cycles", 2))
+    protect_instant_pct = float(config.get("gen6_protect_instant_pct", 0.58))
+    runner_pct = float(config.get("gen6_runner_activation_pct", 0.52))
+    runner_weak_regime_add = float(config.get("gen6_runner_weak_regime_add", 0.12))
+    scaleout_pct = float(config.get("gen6_scaleout_pct", 0.78))
+    scaleout_fraction = float(config.get("gen6_scaleout_fraction", 0.28))
+    trail_tight = float(config.get("gen6_trail_tight_pct", 0.40))
+    trail_runner_weak = float(config.get("gen6_trail_runner_weak_pct", 0.42))
+    trail_runner_mixed = float(config.get("gen6_trail_runner_normal_pct", 0.62))
+    trail_runner_strong = float(config.get("gen6_trail_runner_strong_pct", 0.82))
+    max_hold_cycles = int(config.get("gen6_max_hold_cycles", 46))
+    stall_cycles_exit = int(config.get("gen6_stall_cycles", 11))
+    runner_mom_min = float(config.get("gen6_runner_momentum_min_24h", -0.28))
     catastrophic = float(config.get("gen6_catastrophic_entry_cutoff_pct", -10.5))
-    stall_epsilon = float(config.get("gen6_stall_epsilon_pct", 0.07))
+    stall_epsilon = float(config.get("gen6_stall_epsilon_pct", 0.055))
+    runner_hard_hold_extra = int(config.get("gen6_runner_hard_hold_extra_cycles", 40))
 
     last_trade = last_trade_time_by_symbol or {}
     now = utc_now()
@@ -137,6 +142,8 @@ def get_signals(
     g6 = state.setdefault("gen6", {})
     by_sym: dict = g6.setdefault("by_symbol", {})
     stats = g6.setdefault("stats", {})
+    entry_last_prices: dict[str, float] = g6.setdefault("entry_last_prices", {})
+    entry_prev_change_24h: dict[str, float] = g6.setdefault("entry_prev_change_24h", {})
 
     for s in list(by_sym.keys()):
         p = positions.get(s, {})
@@ -204,26 +211,36 @@ def get_signals(
             m["stall_cycles"] = 0
         m["last_pnl_pct"] = pnl_pct
 
-        if pnl_pct >= protect_pct:
+        # Protected: meaningful green, not a single-tick scalp label — min cycles unless spike.
+        if pnl_pct >= protect_instant_pct or (
+            pnl_pct >= protect_pct and m["cycles_held"] >= protect_min_cycles
+        ):
             m["protected"] = True
         if m["protected"] and not was_protected:
             _inc(stats, "protected_activations")
 
         runner_bar = runner_pct
         if regime == "weak":
-            runner_bar = runner_pct + 0.20
+            runner_bar = runner_pct + runner_weak_regime_add
         elif regime == "strong":
-            runner_bar = max(0.42, runner_pct - 0.08)
+            runner_bar = max(0.38, runner_pct - 0.10)
 
         mom_ok = change_24h >= runner_mom_min
-        follow_through = float(m.get("max_pnl_pct_seen", 0)) >= runner_bar * 0.88
-        price_confirmation = pnl_pct >= runner_bar * 0.92
+        max_seen = float(m.get("max_pnl_pct_seen", pnl_pct))
+        follow_through = max_seen >= runner_bar * 0.85
+        price_confirmation = pnl_pct >= runner_bar * 0.90
+        # Natural upgrade: near-runner strength can promote without waiting for "protected" label first.
+        near_runner_track = m["cycles_held"] >= 2 and max_seen >= runner_bar * 0.78
 
         can_runner = (
-            m["protected"]
-            and pnl_pct >= runner_bar
+            (m["protected"] or near_runner_track)
+            and pnl_pct >= runner_bar * 0.94
             and mom_ok
-            and (follow_through or price_confirmation or (regime == "strong" and pnl_pct >= runner_bar * 1.02))
+            and (
+                follow_through
+                or price_confirmation
+                or (regime == "strong" and pnl_pct >= runner_bar * 0.98)
+            )
         )
 
         if can_runner:
@@ -231,9 +248,9 @@ def get_signals(
             m["stage"] = "runner_mode"
         elif was_runner:
             demote = (
-                pnl_pct < protect_pct * 0.42
-                or (change_24h < runner_mom_min - 0.55 and pnl_pct < runner_bar * 0.75)
-                or (not can_runner and (not mom_ok) and pnl_pct < runner_bar * 0.82)
+                pnl_pct < protect_pct * 0.30
+                or (change_24h < runner_mom_min - 0.60 and pnl_pct < runner_bar * 0.70)
+                or (not can_runner and (not mom_ok) and pnl_pct < runner_bar * 0.74)
             )
             if demote:
                 m["runner_active"] = False
@@ -272,17 +289,17 @@ def get_signals(
 
         if pnl_pct >= 2.4:
             trail *= 1.06
-        elif pnl_pct < 0.48 and m["protected"] and not m["runner_active"]:
-            trail *= 0.90
+        # No extra tightening on small protected non-runner pullbacks — that caused noise exits.
 
-        trail = min(trail, 1.35)
+        trail = min(trail, 1.48)
 
         trail_needs_confirm = not m["runner_active"]
         trail_fired = dd_from_peak_pct >= trail and peak >= avg * 1.001
+        # Non-runner: require clearer giveback or more stall confirmation (not tiny noise).
         if trail_fired and trail_needs_confirm:
-            trail_fired = m["stall_cycles"] >= 2 or dd_from_peak_pct >= trail * 1.08
+            trail_fired = m["stall_cycles"] >= 3 or dd_from_peak_pct >= trail * 1.22
         elif trail_fired and m["runner_active"]:
-            trail_fired = m["stall_cycles"] >= 1 or dd_from_peak_pct >= trail * 1.03
+            trail_fired = m["stall_cycles"] >= 2 or dd_from_peak_pct >= trail * 1.08
 
         position_snapshots.append({
             "symbol": symbol,
@@ -331,48 +348,68 @@ def get_signals(
             sold_this_symbol = True
 
         elif m["cycles_held"] >= max_hold_cycles:
-            if not m["runner_active"] or pnl_pct < protect_pct * 0.80:
-                signals.append((
-                    symbol, OrderSide.SELL, qty,
-                    f"Time exit: held {m['cycles_held']} cycles without sufficient runner follow-through.",
-                    "gen6_time_exit",
-                ))
-                decisions.append({
-                    "symbol": symbol,
-                    "action": "exiting_on_timeout",
-                    "reason": "Trade did not develop in time; releasing capital for active trading.",
-                })
-                _inc(stats, "exits_timeout")
-                _record_exit("gen6_time_exit", False, "Time exit — no follow-through")
-                sold_this_symbol = True
-            elif m["runner_active"] and m["stall_cycles"] >= stall_cycles_exit + 5:
-                signals.append((
-                    symbol, OrderSide.SELL, qty,
-                    "Time + stall: runner stalled too long; locking in progress.",
-                    "gen6_time_stall",
-                ))
-                decisions.append({
-                    "symbol": symbol,
-                    "action": "exiting_on_timeout",
-                    "reason": "Runner mode but price stalled; exiting per time/stagnation rules.",
-                })
-                _inc(stats, "exits_timeout")
-                _record_exit("gen6_time_stall", False, "Timeout with stalled runner")
-                sold_this_symbol = True
-            elif m["cycles_held"] >= max_hold_cycles + 32:
-                signals.append((
-                    symbol, OrderSide.SELL, qty,
-                    f"Hard time cap: held {m['cycles_held']} cycles — active trader, not long-term hold.",
-                    "gen6_hard_time_cap",
-                ))
-                decisions.append({
-                    "symbol": symbol,
-                    "action": "exiting_on_timeout",
-                    "reason": "Absolute max hold reached; releasing capital even if runner was still active.",
-                })
-                _inc(stats, "exits_timeout")
-                _record_exit("gen6_hard_time_cap", False, "Hard max hold cap")
-                sold_this_symbol = True
+            if m["runner_active"]:
+                if m["stall_cycles"] >= stall_cycles_exit + 8:
+                    signals.append((
+                        symbol, OrderSide.SELL, qty,
+                        "Time + stall: runner stalled too long; locking in progress.",
+                        "gen6_time_stall",
+                    ))
+                    decisions.append({
+                        "symbol": symbol,
+                        "action": "exiting_on_timeout",
+                        "reason": "Runner mode but move stalled meaningfully; exiting per time/stagnation rules.",
+                    })
+                    _inc(stats, "exits_timeout")
+                    _record_exit("gen6_time_stall", False, "Timeout with stalled runner")
+                    sold_this_symbol = True
+                elif m["cycles_held"] >= max_hold_cycles + runner_hard_hold_extra:
+                    signals.append((
+                        symbol, OrderSide.SELL, qty,
+                        f"Hard time cap: held {m['cycles_held']} cycles — active trader, not long-term hold.",
+                        "gen6_hard_time_cap",
+                    ))
+                    decisions.append({
+                        "symbol": symbol,
+                        "action": "exiting_on_timeout",
+                        "reason": "Absolute max hold reached; releasing capital even if runner was still active.",
+                    })
+                    _inc(stats, "exits_timeout")
+                    _record_exit("gen6_hard_time_cap", False, "Hard max hold cap")
+                    sold_this_symbol = True
+            else:
+                # Healthy developing non-runners get extra cycles; flat probes still clear at base cap.
+                healthy_building = (
+                    max_seen >= runner_bar * 0.86
+                    or (m["protected"] and pnl_pct >= 0.20 and max_seen >= protect_pct * 1.12)
+                )
+                nr_cap = max_hold_cycles + (18 if healthy_building else 0)
+                if m["cycles_held"] >= nr_cap:
+                    dead = (
+                        (pnl_pct < protect_pct * 0.42 and max_seen < runner_bar * 0.68)
+                        or (max_seen < protect_pct * 0.82 and m["stall_cycles"] >= stall_cycles_exit)
+                    )
+                    abs_cap = m["cycles_held"] >= max_hold_cycles + 26
+                    healthy_max = max_hold_cycles + 24
+                    if not healthy_building:
+                        should_time_exit = True
+                    else:
+                        # Extended window for a developing winner; still must exit if dead or past firm cap.
+                        should_time_exit = dead or abs_cap or m["cycles_held"] >= healthy_max
+                    if should_time_exit:
+                        signals.append((
+                            symbol, OrderSide.SELL, qty,
+                            f"Time exit: held {m['cycles_held']} cycles — move did not develop or stalled as non-runner.",
+                            "gen6_time_exit",
+                        ))
+                        decisions.append({
+                            "symbol": symbol,
+                            "action": "exiting_on_timeout",
+                            "reason": "No runner follow-through or stalled probe; healthy builders had extra time first.",
+                        })
+                        _inc(stats, "exits_timeout")
+                        _record_exit("gen6_time_exit", False, "Time exit — no follow-through")
+                        sold_this_symbol = True
 
         elif pnl_pct > 0 and trail_fired:
             signals.append((
@@ -393,12 +430,16 @@ def get_signals(
             m["protected"]
             and not m["runner_active"]
             and pnl_pct > 0
-            and m["stall_cycles"] >= (stall_cycles_exit + 2 if pnl_pct < 0.85 else stall_cycles_exit)
-            and change_24h < 0.06
+            and pnl_pct < runner_bar * 0.92
+            and (
+                (m["stall_cycles"] >= stall_cycles_exit + 6 and change_24h < 0.05)
+                or (m["stall_cycles"] >= stall_cycles_exit + 10)
+            )
+            and change_24h < 0.15
         ):
             signals.append((
                 symbol, OrderSide.SELL, qty,
-                f"Weak momentum exit: +{pnl_pct:.2f}% but stalled {m['stall_cycles']} cycles; 24h {change_24h:+.2f}%.",
+                f"Weak momentum exit: +{pnl_pct:.2f}% stalled {m['stall_cycles']} cycles; 24h {change_24h:+.2f}% — move failed to strengthen.",
                 "gen6_weak_momentum",
             ))
             decisions.append({
@@ -412,9 +453,9 @@ def get_signals(
 
         elif (
             m["runner_active"]
-            and pnl_pct > protect_pct * 0.92
-            and change_24h < runner_mom_min - 0.28
-            and dd_from_peak_pct >= trail * 0.52
+            and pnl_pct > protect_pct * 0.88
+            and change_24h < runner_mom_min - 0.32
+            and dd_from_peak_pct >= trail * 0.62
         ):
             signals.append((
                 symbol, OrderSide.SELL, qty,
@@ -533,17 +574,27 @@ def get_signals(
         })
 
     if any_runner:
-        summary = "Runner mode active — wider trail while follow-through holds; trims on real giveback, not noise."
+        summary = (
+            "Runner mode active — wider trail; exits on meaningful rollover or stalled runner, not small pullbacks."
+        )
     elif protective_entries:
         summary = "Defensive: broad weakness; favoring exits and skipping new rebound entries."
     elif signals and any(s[1] == OrderSide.BUY for s in signals):
-        summary = "Selective rebound entries; staged protect → runner on real strength."
+        summary = "Selective rebound entries; protect after meaningful green, promote to runner as strength proves out."
     elif signals and any(s[1] == OrderSide.SELL for s in signals):
-        summary = "Managing exits (stop, trail, weak-momentum, or time) — retain gains, free capital when stalled."
+        summary = "Managing exits on real weakness, giveback, or dead time — not micro noise (larger capture vs Gen 7)."
     elif at_daily_cap:
         summary = "Daily trade cap reached; standing down on new entries."
     else:
-        summary = "Scanning dip-to-rebound setups; mixed markets slightly relaxed vs deep knives only."
+        summary = (
+            "Scanning dip setups; entries require rebound/stabilization vs prior lab tick — then rider hold logic."
+        )
+
+    # Refresh entry baselines for next cycle (all enabled symbols; flat or held).
+    for t in ticks:
+        if t.symbol in enabled:
+            entry_last_prices[t.symbol] = float(t.price)
+            entry_prev_change_24h[t.symbol] = float(t.change_24h)
 
     rollup = _rollup_leg_history(g6.get("leg_history", []))
 

@@ -75,19 +75,60 @@ GEN_DEFAULTS = {
             "stop_loss_pct": -1.12,
             "max_trades_per_day": 40,
             "cooldown_minutes": 7.0,
-            "gen6_protect_profit_pct": 0.30,
-            "gen6_runner_activation_pct": 0.62,
-            "gen6_scaleout_pct": 0.55,
-            "gen6_scaleout_fraction": 0.38,
-            "gen6_trail_tight_pct": 0.28,
-            "gen6_trail_runner_weak_pct": 0.36,
-            "gen6_trail_runner_normal_pct": 0.55,
-            "gen6_trail_runner_strong_pct": 0.72,
-            "gen6_max_hold_cycles": 36,
-            "gen6_stall_cycles": 9,
-            "gen6_runner_momentum_min_24h": -0.22,
+            "gen6_protect_profit_pct": 0.42,
+            "gen6_protect_min_cycles": 2,
+            "gen6_protect_instant_pct": 0.58,
+            "gen6_runner_activation_pct": 0.52,
+            "gen6_runner_weak_regime_add": 0.12,
+            "gen6_scaleout_pct": 0.78,
+            "gen6_scaleout_fraction": 0.28,
+            "gen6_trail_tight_pct": 0.40,
+            "gen6_trail_runner_weak_pct": 0.42,
+            "gen6_trail_runner_normal_pct": 0.62,
+            "gen6_trail_runner_strong_pct": 0.82,
+            "gen6_max_hold_cycles": 46,
+            "gen6_stall_cycles": 11,
+            "gen6_runner_momentum_min_24h": -0.28,
             "gen6_catastrophic_entry_cutoff_pct": -10.5,
-            "gen6_stall_epsilon_pct": 0.07,
+            "gen6_stall_epsilon_pct": 0.055,
+            "gen6_runner_hard_hold_extra_cycles": 40,
+            "gen6_entry_confirm_bounce_pct": 0.032,
+            "gen6_entry_max_cycle_bleed_pct": -0.072,
+            "gen6_entry_stabilize_cycle_floor_pct": -0.022,
+            "gen6_entry_stabilize_24h_epsilon": 0.11,
+            "gen6_entry_deep_dip_threshold_pct": -2.8,
+            "gen6_entry_deep_dip_extra_bounce_pct": 0.018,
+        },
+    },
+    "7": {
+        "enabled": True,
+        "label": "Active Micro-Movement Trader",
+        "overrides": {
+            "position_size_pct": 2.5,
+            "cooldown_minutes": 3.0,
+            "max_open_positions": 5,
+            "max_exposure_per_coin_pct": 10.0,
+            "max_total_exposure_pct": 48.0,
+            "min_trade_usd": 22.0,
+            "max_trade_pct_of_balance": 7.0,
+            "max_trades_per_day": 48,
+            "gen7_take_profit_pct": 0.22,
+            "gen7_stop_loss_pct": -0.36,
+            "gen7_max_hold_cycles": 9,
+            "gen7_max_hold_hard_cycles": 14,
+            "gen7_stall_cycles": 4,
+            "gen7_stall_epsilon_pct": 0.05,
+            "gen7_timeout_min_progress_pct": 0.06,
+            "gen7_micro_lock_profit_pct": 0.14,
+            "gen7_micro_lock_stall_cycles": 2,
+            "gen7_fade_from_peak_pct": 0.09,
+            "gen7_fade_min_peak_pct": 0.10,
+            "gen7_min_price_drop_pct": -0.38,
+            "gen7_max_entry_change_24h_pct": 0.42,
+            "gen7_catastrophic_entry_cutoff_pct": -9.0,
+            "gen7_rs_vs_avg_buffer_pct": 2.8,
+            "gen7_cycle_burst_min_pct": 0.035,
+            "gen7_continuation_max_24h_pct": 0.38,
         },
     },
 }
@@ -120,7 +161,7 @@ def _load_raw() -> dict:
             "generations": data.get("generations") or GEN_DEFAULTS.copy(),
             "api_keys": {**API_KEYS_DEFAULTS, **(data.get("api_keys") or {})},
         }
-        for g in "1", "2", "3", "4":
+        for g in "1", "2", "3", "4", "5", "6", "7":
             if g not in out["generations"]:
                 out["generations"][g] = GEN_DEFAULTS.get(g, {"enabled": True, "label": f"Gen {g}", "overrides": {}})
         return out
@@ -156,7 +197,7 @@ def get_gen_config(gen_id: str) -> dict:
 
 
 def get_all_gen_configs() -> dict[str, dict]:
-    return {g: get_gen_config(g) for g in ("1", "2", "3", "4", "5", "6")}
+    return {g: get_gen_config(g) for g in ("1", "2", "3", "4", "5", "6", "7")}
 
 
 def get_api_keys() -> dict[str, str]:

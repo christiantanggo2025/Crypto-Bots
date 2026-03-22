@@ -5,7 +5,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const API = API_BASE ? `${API_BASE}/api` : "/api";
 const LAB = "/lab"; // API + LAB = full /api/lab or https://host/api/lab
 
-type TabId = "overview" | "gen1" | "gen2" | "gen3" | "gen4" | "gen5" | "gen6" | "comparison" | "settings";
+type TabId = "overview" | "gen1" | "gen2" | "gen3" | "gen4" | "gen5" | "gen6" | "gen7" | "comparison" | "settings";
 
 const TAB_TO_GEN_ID: Partial<Record<TabId, string>> = {
   gen1: "1",
@@ -172,6 +172,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "gen4", label: "Gen 4" },
   { id: "gen5", label: "Gen 5" },
   { id: "gen6", label: "Gen 6" },
+  { id: "gen7", label: "Gen 7" },
   { id: "comparison", label: "Comparison" },
   { id: "settings", label: "Settings" },
 ];
@@ -270,6 +271,7 @@ export default function App() {
         {activeTab === "gen4" && <GenTab genId="4" label="Gen 4: AI Supervisor Bot" description="AI and news decide allow/limit/block. More selective and strategic." detail={genDetail["4"]} summary={overview?.generations?.find((g) => g.gen_id === "4")} loading={genDetailLoading["4"]} error={genDetailError["4"]} isAi />}
         {activeTab === "gen5" && <GenTab genId="5" label="Gen 5: Aggressive Scalper Bot" description="Intraday-focused: smaller positions, faster profit targets, shorter holds. Looks for quick rebound opportunities and backs off when the market is weak or messy." detail={genDetail["5"]} summary={overview?.generations?.find((g) => g.gen_id === "5")} loading={genDetailLoading["5"]} error={genDetailError["5"]} isScalper />}
         {activeTab === "gen6" && <GenTab genId="6" label="Gen 6: Momentum Rider Bot" description="Hybrid scalper / trend rider: disciplined rebound entries, tight initial risk, staged profits, runner mode with trailing exits—captures larger moves without a single fixed take-profit." detail={genDetail["6"]} summary={overview?.generations?.find((g) => g.gen_id === "6")} loading={genDetailLoading["6"]} error={genDetailError["6"]} isMomentumRider />}
+        {activeTab === "gen7" && <GenTab genId="7" label="Gen 7: Active Micro-Movement Trader" description="Aggressive short-hold micro-trader: many small intraday-style opportunities, quick targets, tight stops, stall and time exits—not a long-hold runner like Gen 6." detail={genDetail["7"]} summary={overview?.generations?.find((g) => g.gen_id === "7")} loading={genDetailLoading["7"]} error={genDetailError["7"]} isMicroTrader />}
         {activeTab === "comparison" && comparison && <ComparisonTab rows={comparison} />}
         {activeTab === "settings" && <SettingsTab />}
       </main>
@@ -626,6 +628,7 @@ function GenTab({
   isAi,
   isScalper,
   isMomentumRider,
+  isMicroTrader,
 }: {
   genId: string;
   label: string;
@@ -637,6 +640,7 @@ function GenTab({
   isAi?: boolean;
   isScalper?: boolean;
   isMomentumRider?: boolean;
+  isMicroTrader?: boolean;
 }) {
   const [resetting, setResetting] = useState(false);
   const status = detail?.status;
@@ -830,6 +834,119 @@ function GenTab({
               <div><span style={{ color: "var(--text-muted)" }}>Total P&amp;L</span><br />{pnlUsd != null ? formatUsd(pnlUsd) : "—"}</div>
               <div><span style={{ color: "var(--text-muted)" }}>Win rate (scored sells)</span><br />{winRate != null ? `${winRate.toFixed(1)}%` : "—"}</div>
               <div><span style={{ color: "var(--text-muted)" }}>Trades</span><br />{trades.length}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Exposure</span><br />{formatUsd(exposureUsd)}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Unrealized P&amp;L</span><br /><span style={{ color: unrealizedPnl >= 0 ? "var(--green)" : "var(--red)" }}>{formatUsd(unrealizedPnl)}</span></div>
+            </div>
+          </div>
+        </div>
+      )}
+      {isMicroTrader && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          <h3 style={{ fontSize: "1rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>Gen 7: Micro-trader status</h3>
+          <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10, padding: "1.25rem", display: "grid", gap: "1rem" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "0.75rem", fontSize: "0.9rem" }}>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Operational state</div>
+                <div style={{ fontWeight: 600 }}>
+                  {summary?.enabled === false
+                    ? "Disabled"
+                    : status?.gen7_operational_state === "defensive_mode"
+                      ? "Defensive mode"
+                      : status?.gen7_operational_state === "in_trade"
+                        ? "In a trade"
+                        : "Scanning"}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Market regime</div>
+                <div style={{ fontWeight: 600 }}>{status?.gen7_market_regime ?? "—"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>New entries</div>
+                <div style={{ fontWeight: 600 }}>{status?.gen7_defensive_entries ? "Paused (defensive)" : "Allowed"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Avg 24h</div>
+                <div style={{ fontFamily: "var(--font-mono)" }}>{status?.gen7_market_avg_24h != null ? formatPct(status.gen7_market_avg_24h) : "—"}</div>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.25rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Strategy summary</div>
+              <div style={{ fontSize: "0.95rem" }}>{status?.gen7_strategy_summary ?? "No summary from last cycle yet."}</div>
+            </div>
+            <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+              Identity: short holds, small targets, frequent turnover — harvests repeated small moves; does not ride large trends like Gen 6.
+            </div>
+            {(status?.gen7_last_exit_reason || status?.gen7_last_exit_tag) && (
+              <div style={{ padding: "0.75rem", background: "var(--surface)", borderRadius: 8, border: "1px solid var(--border)" }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.35rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Latest exit (last cycle)</div>
+                <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>{status?.gen7_last_exit_reason ?? "—"}</div>
+                {status?.gen7_last_exit_tag && (
+                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginTop: "0.25rem" }}>{String(status.gen7_last_exit_tag)}</div>
+                )}
+              </div>
+            )}
+            {status?.gen7_evaluation_metrics && typeof status.gen7_evaluation_metrics === "object" && (
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Session counters (since reset)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "0.5rem 1rem", fontSize: "0.85rem", fontFamily: "var(--font-mono)" }}>
+                  {(() => {
+                    const ev = status.gen7_evaluation_metrics as Record<string, unknown>;
+                    const n = (k: string) => (typeof ev[k] === "number" ? (ev[k] as number) : null);
+                    const fmt = (k: string) => {
+                      const v = n(k);
+                      return v != null ? String(v) : "—";
+                    };
+                    return (
+                      <>
+                        <span>Micro entries: {fmt("gen7_entries")}</span>
+                        <span>Exits — quick profit: {fmt("gen7_exits_quick_profit")}</span>
+                        <span>Exits — stop: {fmt("gen7_exits_stop")}</span>
+                        <span>Exits — timeout: {fmt("gen7_exits_timeout")}</span>
+                        <span>Exits — stall: {fmt("gen7_exits_stall")}</span>
+                        <span>Exits — momentum / tape: {fmt("gen7_exits_momentum")}</span>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+            {Array.isArray(status?.gen7_position_snapshots) && status.gen7_position_snapshots.length > 0 && (
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>Open positions (per-symbol state)</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid var(--border)", textAlign: "left" }}>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Symbol</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Stage</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>P&amp;L%</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Max seen%</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Cycles</th>
+                        <th style={{ padding: "0.35rem 0.5rem", color: "var(--text-muted)" }}>Stall</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(status.gen7_position_snapshots as any[]).map((row: any, i: number) => (
+                        <tr key={i} style={{ borderBottom: "1px solid var(--border)" }}>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{(row.symbol || "").replace("USDT", "")}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.stage ?? "—"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.pnl_pct != null ? formatPct(row.pnl_pct) : "—"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.max_pnl_pct_seen != null ? formatPct(row.max_pnl_pct_seen) : "—"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.cycles_held ?? "—"}</td>
+                          <td style={{ padding: "0.35rem 0.5rem" }}>{row.stall_cycles ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "0.75rem", fontFamily: "var(--font-mono)", fontSize: "0.9rem" }}>
+              <div><span style={{ color: "var(--text-muted)" }}>Total P&amp;L</span><br />{pnlUsd != null ? formatUsd(pnlUsd) : "—"}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Win rate (scored sells)</span><br />{winRate != null ? `${winRate.toFixed(1)}%` : "—"}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Trades</span><br />{trades.length}</div>
+              <div><span style={{ color: "var(--text-muted)" }}>Trades today</span><br />{tradeCountToday}</div>
               <div><span style={{ color: "var(--text-muted)" }}>Exposure</span><br />{formatUsd(exposureUsd)}</div>
               <div><span style={{ color: "var(--text-muted)" }}>Unrealized P&amp;L</span><br /><span style={{ color: unrealizedPnl >= 0 ? "var(--green)" : "var(--red)" }}>{formatUsd(unrealizedPnl)}</span></div>
             </div>
@@ -1201,7 +1318,9 @@ function SettingsTab() {
       </section>
       <section style={{ marginBottom: "2rem" }}>
         <h3 style={{ fontSize: "1rem", marginBottom: "0.75rem" }}>Gen 6: Momentum Rider Bot</h3>
-        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>Staged profit, runner mode, trailing exits, partial scale-out. Tune risk and pacing.</p>
+        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
+          Staged profit, runner mode, trailing exits, partial scale-out. Entries need dip context <strong>plus</strong> rebound/stabilization vs the prior lab price tick (not dip-only).
+        </p>
         {(() => {
           const gens = form.generations || {};
           const g6 = gens["6"] || { enabled: true, label: "Momentum Rider Bot", overrides: {} };
@@ -1246,35 +1365,106 @@ function SettingsTab() {
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                 <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Protected profit % (stage 1)</span>
-                <input type="number" step="0.05" value={ov.gen6_protect_profit_pct ?? 0.30} onChange={(e) => update6("gen6_protect_profit_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+                <input type="number" step="0.05" value={ov.gen6_protect_profit_pct ?? 0.42} onChange={(e) => update6("gen6_protect_profit_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                 <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Runner activation %</span>
-                <input type="number" step="0.05" value={ov.gen6_runner_activation_pct ?? 0.62} onChange={(e) => update6("gen6_runner_activation_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+                <input type="number" step="0.05" value={ov.gen6_runner_activation_pct ?? 0.52} onChange={(e) => update6("gen6_runner_activation_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                 <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Scale-out at % profit</span>
-                <input type="number" step="0.05" value={ov.gen6_scaleout_pct ?? 0.55} onChange={(e) => update6("gen6_scaleout_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+                <input type="number" step="0.05" value={ov.gen6_scaleout_pct ?? 0.78} onChange={(e) => update6("gen6_scaleout_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                 <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Scale-out fraction (0–1)</span>
-                <input type="number" step="0.05" min="0" max="1" value={ov.gen6_scaleout_fraction ?? 0.38} onChange={(e) => update6("gen6_scaleout_fraction", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+                <input type="number" step="0.05" min="0" max="1" value={ov.gen6_scaleout_fraction ?? 0.28} onChange={(e) => update6("gen6_scaleout_fraction", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                 <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Max hold (cycles)</span>
-                <input type="number" min="5" value={ov.gen6_max_hold_cycles ?? 36} onChange={(e) => update6("gen6_max_hold_cycles", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+                <input type="number" min="5" value={ov.gen6_max_hold_cycles ?? 46} onChange={(e) => update6("gen6_max_hold_cycles", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                 <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Stall cycles (weak exit)</span>
-                <input type="number" min="1" value={ov.gen6_stall_cycles ?? 9} onChange={(e) => update6("gen6_stall_cycles", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+                <input type="number" min="1" value={ov.gen6_stall_cycles ?? 11} onChange={(e) => update6("gen6_stall_cycles", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                 <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Stall epsilon % (flat detection)</span>
-                <input type="number" step="0.01" min="0.02" value={ov.gen6_stall_epsilon_pct ?? 0.07} onChange={(e) => update6("gen6_stall_epsilon_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+                <input type="number" step="0.01" min="0.02" value={ov.gen6_stall_epsilon_pct ?? 0.055} onChange={(e) => update6("gen6_stall_epsilon_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
               </label>
               <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
                 <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Max trades / day</span>
                 <input type="number" min="1" value={ov.max_trades_per_day ?? 40} onChange={(e) => update6("max_trades_per_day", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+            </div>
+          );
+        })()}
+      </section>
+      <section style={{ marginBottom: "2rem" }}>
+        <h3 style={{ fontSize: "1rem", marginBottom: "0.75rem" }}>Gen 7: Active Micro-Movement Trader</h3>
+        <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
+          Short-hold micro strategy: small take-profit, tight stop, stall/time exits, defensive mode on broad weakness.
+        </p>
+        {(() => {
+          const gens = form.generations || {};
+          const g7 = gens["7"] || { enabled: true, label: "Active Micro-Movement Trader", overrides: {} };
+          const ov = g7.overrides || {};
+          const update7 = (key: string, val: any) => setForm((f) => {
+            if (!f) return f;
+            const generations = { ...f.generations };
+            generations["7"] = { ...generations["7"], overrides: { ...(generations["7"]?.overrides || {}), [key]: val } };
+            return { ...f, generations };
+          });
+          const update7Enabled = (v: boolean) => setForm((f) => {
+            if (!f) return f;
+            const generations = { ...f.generations };
+            generations["7"] = { ...generations["7"], enabled: v };
+            return { ...f, generations };
+          });
+          return (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "1rem", padding: "1rem", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <input type="checkbox" checked={g7.enabled !== false} onChange={(e) => update7Enabled(e.target.checked)} />
+                <span style={{ fontSize: "0.9rem" }}>Enabled</span>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Starting balance ($)</span>
+                <input type="number" step="100" min="0" value={ov.starting_balance ?? 10000} onChange={(e) => update7("starting_balance", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Position size %</span>
+                <input type="number" step="0.5" min="0.5" value={ov.position_size_pct ?? 2.5} onChange={(e) => update7("position_size_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Cooldown (min)</span>
+                <input type="number" step="0.5" min="0" value={ov.cooldown_minutes ?? 3} onChange={(e) => update7("cooldown_minutes", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Take profit % (micro)</span>
+                <input type="number" step="0.02" value={ov.gen7_take_profit_pct ?? 0.22} onChange={(e) => update7("gen7_take_profit_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Stop loss %</span>
+                <input type="number" step="0.02" value={ov.gen7_stop_loss_pct ?? -0.36} onChange={(e) => update7("gen7_stop_loss_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Max hold (cycles)</span>
+                <input type="number" min="3" value={ov.gen7_max_hold_cycles ?? 9} onChange={(e) => update7("gen7_max_hold_cycles", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Hard max hold (cycles)</span>
+                <input type="number" min="4" value={ov.gen7_max_hold_hard_cycles ?? 14} onChange={(e) => update7("gen7_max_hold_hard_cycles", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Stall exit (cycles)</span>
+                <input type="number" min="2" value={ov.gen7_stall_cycles ?? 4} onChange={(e) => update7("gen7_stall_cycles", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Min dip % (24h entry)</span>
+                <input type="number" step="0.02" value={ov.gen7_min_price_drop_pct ?? -0.38} onChange={(e) => update7("gen7_min_price_drop_pct", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Max trades / day</span>
+                <input type="number" min="1" value={ov.max_trades_per_day ?? 48} onChange={(e) => update7("max_trades_per_day", e.target.valueAsNumber)} style={{ padding: "0.5rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text)" }} />
               </label>
             </div>
           );

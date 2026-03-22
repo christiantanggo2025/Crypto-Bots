@@ -17,7 +17,7 @@ from app.market import get_cached_prices
 from app.paper_engine import load_state, get_positions
 from app.time_toronto import count_trades_toronto_today, parse_trade_timestamp, utc_now
 
-LAB_GEN_IDS = ("1", "2", "3", "4", "5", "6")
+LAB_GEN_IDS = ("1", "2", "3", "4", "5", "6", "7")
 
 RANGE_ALIASES = {
     "all_time": None,
@@ -68,6 +68,16 @@ def _exit_reason_from_world_signal(ws: str | None, reason: str = "") -> str:
         return "hard_stop"
     if "gen6_scaleout" in w or "scale-out" in r or "partial scale" in r:
         return "scale_out"
+    if "gen7_quick" in w or "gen7_stall_take" in w:
+        return "gen7_quick_profit"
+    if "gen7_stop" in w:
+        return "gen7_stop"
+    if "gen7_timeout" in w or "gen7_hard_cap" in w:
+        return "gen7_timeout"
+    if "gen7_stall" in w:
+        return "gen7_stall"
+    if "gen7_momentum" in w or "gen7_tape_weak" in w:
+        return "gen7_momentum_loss"
     if "take_profit" in w or "scalp tp" in r or "tp:" in r:
         return "take_profit"
     if "stop_loss" in w or "scalp sl" in r or "sl:" in r:
@@ -301,10 +311,40 @@ def _decision_summary(gen_id: str, state: dict) -> dict[str, Any]:
             "latest_reason": state.get("gen5_strategy_summary") or "",
             "decision_source": "rules",
         }
+    if gen_id == "7":
+        return {
+            "latest_decision": state.get("gen7_operational_state") or "scanning",
+            "latest_reason": state.get("gen7_strategy_summary") or "",
+            "decision_source": "rules",
+        }
     return {
         "latest_decision": None,
         "latest_reason": "",
         "decision_source": "rules",
+    }
+
+
+def _gen7_metrics_block(state: dict) -> dict[str, Any] | None:
+    ev = state.get("gen7_evaluation_metrics") or {}
+    if not ev and not state.get("gen7"):
+        return None
+
+    def _i(k: str) -> int:
+        v = ev.get(k)
+        try:
+            return int(v) if v is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
+    return {
+        "micro_entries": _i("gen7_entries"),
+        "exits_quick_profit": _i("gen7_exits_quick_profit"),
+        "exits_stop": _i("gen7_exits_stop"),
+        "exits_timeout": _i("gen7_exits_timeout"),
+        "exits_stall": _i("gen7_exits_stall"),
+        "exits_momentum": _i("gen7_exits_momentum"),
+        "operational_state": ev.get("operational_state"),
+        "regime": ev.get("regime"),
     }
 
 
@@ -341,7 +381,12 @@ def _positions_report(gen_id: str, state: dict, positions: list, price_map: dict
     for p in positions:
         sym = p.symbol
         base = sym.replace("USDT", "")
-        snap = g6_snaps.get(sym, {})
+        if gen_id == "6":
+            snap = g6_snaps.get(sym, {})
+        elif gen_id == "7":
+            snap = g7_snaps.get(sym, {})
+        else:
+            snap = {}
         entry = float(p.avg_price)
         cur = float(p.current_price)
         pnl_pct = float(p.pnl_percent)
@@ -369,6 +414,7 @@ def _positions_report(gen_id: str, state: dict, positions: list, price_map: dict
             "runner_active": bool(snap.get("runner_active", False)),
             "protected": bool(snap.get("protected", pnl_pct >= 0.3)),
             "scaled_out": bool(snap.get("scaled_out", False)),
+            "micro_cycles_held": snap.get("cycles_held") if gen_id == "7" else None,
         })
     return out
 
@@ -439,6 +485,7 @@ def build_lab_report(range_key: str = "all_time") -> dict[str, Any]:
             "recent_trades": recent_trades,
             "decision_summary": _decision_summary(gen_id, state),
             "gen6_metrics": _gen6_metrics_block(state) if gen_id == "6" else None,
+            "gen7_metrics": _gen7_metrics_block(state) if gen_id == "7" else None,
         }
         bots.append(bot)
 
@@ -472,9 +519,11 @@ def build_lab_report(range_key: str = "all_time") -> dict[str, Any]:
     notes.append(f"Most fills in range: {most_trades['bot_id']} ({most_trades['performance']['total_trades']} trades).")
     mw = _market_snapshot_from_ticks(ticks)
     if mw.get("market_character") == "weak":
-        notes.append("Market snapshot looks weak — expect defensive behavior from supervised / rider bots.")
+        notes.append("Market snapshot looks weak — expect defensive behavior from supervised / rider / Gen 7 micro bots.")
     elif mw.get("market_character") == "strong":
-        notes.append("Market snapshot favorable — momentum-style bots may show wider trails.")
+        notes.append("Market snapshot favorable — momentum-style bots may show wider trails; Gen 7 may be more active on micro setups.")
+    elif mw.get("market_character") == "mixed":
+        notes.append("Mixed tape — Gen 7 (micro-movement trader) is tuned for repeated small opportunities in choppy conditions.")
 
     lc = lab_last_cycle
     last_cycle_iso = lc.isoformat().replace("+00:00", "Z") if isinstance(lc, datetime) else None
@@ -638,6 +687,18 @@ def report_to_markdown(report: dict) -> str:
             lines.append(f"- Runner / protected activations: {g.get('runner_activations')} / {g.get('protected_activations')}")
             lines.append(
                 f"- Exits — trail: {g.get('trailing_exits')}, timeout: {g.get('timeout_exits')}, weak: {g.get('weak_exits')}, stop: {g.get('failed_rebounds')}"
+            )
+            lines.append("")
+        if b.get("gen7_metrics"):
+            g7 = b["gen7_metrics"]
+            lines.append("### Gen 7 metrics (micro-trader)")
+            lines.append(
+                f"- State / regime: {g7.get('operational_state')} / {g7.get('regime')}"
+            )
+            lines.append(
+                f"- Entries (session counter): {g7.get('micro_entries')} | "
+                f"exits — quick: {g7.get('exits_quick_profit')}, stop: {g7.get('exits_stop')}, "
+                f"timeout: {g7.get('exits_timeout')}, stall: {g7.get('exits_stall')}, momentum: {g7.get('exits_momentum')}"
             )
             lines.append("")
 

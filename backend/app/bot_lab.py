@@ -1,5 +1,5 @@
 """
-Strategy lab: one cycle = fetch prices once, then run Gen 1–6 in sequence with same snapshot.
+Strategy lab: one cycle = fetch prices once, then run Gen 1–7 in sequence with same snapshot.
 Each gen has its own paper state and config. Status per gen is kept for the API.
 """
 from __future__ import annotations
@@ -30,6 +30,7 @@ from app.strategies.gen3_adaptive import get_signals as get_signals_gen3
 from app.strategies.gen4_ai_supervisor import get_signals as get_signals_gen4
 from app.strategies.gen5_scalper import get_signals as get_signals_gen5
 from app.strategies.gen6_momentum_rider import get_signals as get_signals_gen6
+from app.strategies.gen7_micro_trader import get_signals as get_signals_gen7
 from app.news_sentiment import fetch_news_context
 from app.openai_supervisor import get_supervisor_decision
 from app.models import OrderSide
@@ -159,6 +160,7 @@ def _run_gen(gen_id: str, ticks: list, config: dict, state: dict, prices: dict):
     state.setdefault("decisions", [])
     gen5_context: dict | None = None
     gen6_context: dict | None = None
+    gen7_context: dict | None = None
     if gen_id == "1":
         result = get_signals_gen1(ticks, state["balance_usd"], state["positions"], config, _last_trade_time_by_symbol(state))
         signals = result if isinstance(result, list) else result[0]
@@ -174,6 +176,16 @@ def _run_gen(gen_id: str, ticks: list, config: dict, state: dict, prices: dict):
         decisions = []
     elif gen_id == "6":
         signals, decisions, gen6_context = get_signals_gen6(
+            ticks,
+            state["balance_usd"],
+            state["positions"],
+            config,
+            _last_trade_time_by_symbol(state),
+            _count_trades_today(state),
+            state,
+        )
+    elif gen_id == "7":
+        signals, decisions, gen7_context = get_signals_gen7(
             ticks,
             state["balance_usd"],
             state["positions"],
@@ -210,6 +222,21 @@ def _run_gen(gen_id: str, ticks: list, config: dict, state: dict, prices: dict):
         if le:
             state["gen6_last_exit_reason"] = le.get("reason")
             state["gen6_last_exit_tag"] = le.get("tag")
+    if gen_id == "7" and gen7_context:
+        state["gen7_strategy_summary"] = gen7_context.get("strategy_summary", "")
+        state["gen7_market_regime"] = gen7_context.get("market_regime", "mixed")
+        state["gen7_market_avg_24h"] = gen7_context.get("market_avg_24h")
+        state["gen7_broad_weakness"] = gen7_context.get("broad_weakness", False)
+        state["gen7_market_look"] = gen7_context.get("market_look", "mixed")
+        state["gen7_defensive_entries"] = gen7_context.get("defensive_entries", False)
+        state["gen7_operational_state"] = gen7_context.get("operational_state", "scanning")
+        state["gen7_position_snapshots"] = gen7_context.get("position_snapshots", [])
+        state["gen7_evaluation_metrics"] = gen7_context.get("evaluation_metrics", {})
+        le7 = gen7_context.get("last_exit")
+        state["gen7_last_exit"] = le7
+        if le7:
+            state["gen7_last_exit_reason"] = le7.get("reason")
+            state["gen7_last_exit_tag"] = le7.get("tag")
     return state
 
 
@@ -275,7 +302,7 @@ async def _run_lab_cycle_impl():
     lab_status["4"]["last_reasoning"] = supervisor_decision.get("reasoning")
     lab_status["4"]["last_news_context"] = news_context[:500]
 
-    for gen_id in ("1", "2", "3", "4", "5", "6"):
+    for gen_id in ("1", "2", "3", "4", "5", "6", "7"):
         config = configs.get(gen_id) or get_gen_config(gen_id)
         if not config.get("enabled", True):
             continue
